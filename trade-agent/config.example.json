@@ -1,0 +1,17 @@
+{
+  "symbols": ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+  "exchange": "PAPER_TRADING",
+  "strategy": "TRIPLE_CONFLUENCE_PRO",
+  "leverage": 5,
+  "initialTreasuryUsd": 10000,
+  "pollIntervalMs": 5000,
+  "risk": {
+    "maxPositionSizeUsd": 500,
+    "dailyLossLimitUsd": 150,
+    "stopLossPercent": 2.5,
+    "takeProfitPercent": 5.0,
+    "trailingStopPercent": 1.5,
+    "trailingStopEnabled": true,
+    "maxOpenPositions": 3
+  }
+}
