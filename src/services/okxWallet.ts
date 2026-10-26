@@ -208,7 +208,7 @@ export async function getConnectedChainId(): Promise<string | null> {
 }
 
 export async function sendOkxTransaction(tx: {
-  to: string;
+  to?: string;
   from?: string;
   value?: string;
   data?: string;
@@ -222,6 +222,44 @@ export async function sendOkxTransaction(tx: {
     method: 'eth_sendTransaction',
     params: [tx],
   });
+}
+
+/**
+ * Polls JSON-RPC for a transaction receipt and extracts status and contractAddress
+ */
+export async function waitForTxReceipt(
+  txHash: string,
+  rpcUrl: string,
+  maxAttempts = 35,
+  intervalMs = 1500
+): Promise<{ status: number; contractAddress?: string | null; blockNumber?: number } | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now() + i,
+          method: 'eth_getTransactionReceipt',
+          params: [txHash],
+        }),
+      });
+      const data = await res.json();
+      if (data?.result) {
+        const receipt = data.result;
+        return {
+          status: parseInt(receipt.status, 16),
+          contractAddress: receipt.contractAddress || null,
+          blockNumber: receipt.blockNumber ? parseInt(receipt.blockNumber, 16) : undefined,
+        };
+      }
+    } catch {
+      // transient network glitch, keep polling
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
 }
 
 export function registerWalletListeners(

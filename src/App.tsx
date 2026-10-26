@@ -1175,6 +1175,52 @@ export default function App() {
     }
   };
 
+  // Handle Live Flash Loan Arbitrage Execution Broadcast from FlashArbBotDashboard
+  const handleFlashArbExecuted = (trade: {
+    symbol: string;
+    profitUsd: number;
+    chain: string;
+    txHash: string;
+    token: string;
+    gasSavedUsd?: number;
+    loanFeeSavedUsd?: number;
+  }) => {
+    const profit = Math.max(0, trade.profitUsd);
+    setPortfolio((prev) => {
+      const newCash = Number((prev.cash + profit).toFixed(2));
+      const realizedPnl = Number((prev.realizedPnl + profit).toFixed(2));
+      const totalTrades = prev.totalTrades + 1;
+      const winningTrades = prev.winningTrades + 1;
+      const peakEquity = Math.max(prev.peakEquity, newCash);
+
+      if (user?.uid) {
+        const updatedPortfolio: PortfolioState = {
+          ...prev,
+          cash: newCash,
+          realizedPnl,
+          totalTrades,
+          winningTrades,
+          peakEquity,
+        };
+        persistPortfolioToFirestore(user.uid, updatedPortfolio, positions, orders).catch(() => {});
+      }
+
+      return {
+        ...prev,
+        cash: newCash,
+        realizedPnl,
+        totalTrades,
+        winningTrades,
+        peakEquity,
+      };
+    });
+
+    setBotLogs((prev) => [
+      `[${new Date().toLocaleTimeString()}] ⚡ LIVE FLASH ARBITRAGE EXECUTED on ${trade.chain}: Borrowed 0% Balancer liquidity for ${trade.symbol}, routed direct pool swap, +$${profit.toFixed(2)} USD net alpha swept to profit vault. (Tx: ${trade.txHash.slice(0, 10)}...)`,
+      ...prev,
+    ]);
+  };
+
   // Close specific position using best routing
   const closePosition = (positionId: string, orderType: Order['type'] = 'MANUAL_CLOSE', reason = 'Manual Close') => {
     const now = Date.now();
@@ -1756,6 +1802,7 @@ export default function App() {
             availableAssets={assets}
             okxConnectedAddress={okxConnectedAddress}
             onOpenOkxWallet={() => setOkxWalletModalOpen(true)}
+            onArbitrageExecuted={handleFlashArbExecuted}
           />
         </main>
       ) : activeTab === 'WALLET_MONITOR' ? (

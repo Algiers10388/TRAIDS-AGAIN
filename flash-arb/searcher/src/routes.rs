@@ -37,6 +37,7 @@ impl RouteFinder {
         pool_b: &PoolSnapshot,
         base_asset_price_usd: f64,
         gas_price_wei: U256,
+        live_eth_price: f64,
     ) -> Option<ArbitrageOpportunity> {
         let price_a = self.get_marginal_price(pool_a, token_a)?;
         let price_b = self.get_marginal_price(pool_b, token_a)?;
@@ -83,11 +84,11 @@ impl RouteFinder {
         let estimated_gas_units = U256::from(320_000);
         let estimated_gas_cost = estimated_gas_units * gas_price_wei;
 
-        // Convert gross profit to USD
+        // Convert gross profit to USD using dynamic asset & ETH prices
         let decimals_divisor = 1e18; // Standard 18-decimal base
         let gross_profit_tokens = gross_profit.as_u128() as f64 / decimals_divisor;
         let gas_cost_tokens = estimated_gas_cost.as_u128() as f64 / 1e18;
-        let eth_price = if symbol == "WETH" { base_asset_price_usd } else { 2800.0 };
+        let eth_price = if symbol == "WETH" { base_asset_price_usd } else { live_eth_price };
 
         let net_profit_usd = (gross_profit_tokens * base_asset_price_usd) - (gas_cost_tokens * eth_price);
 

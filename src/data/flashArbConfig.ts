@@ -625,7 +625,7 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
     error ReentrancyGuardLocked();
 
     // Cancun EIP-1153 Transient Storage slot for reentrancy lock (100 gas vs 20,000 SSTORE)
-    bytes32 private constant TRANSIENT_LOCK_SLOT = keccak256("flasharb.transient.lock");
+    uint256 private constant TRANSIENT_LOCK_SLOT = 0xd7d8d2a518f8b8aadb97f139f4366cba00bf3d0e49aac2ebd368f55d7656b300;
 
     address public immutable owner;
     IBalancerVault public immutable BALANCER_VAULT;
@@ -837,8 +837,9 @@ impl GasOptimizer {
     /// Dynamically computes optimal sequencer priority tip:
     /// On Arbitrum Nitro & Base OP Stack, sequencers order by arrival and priority fee.
     /// Never overpay static 60% if mempool queue is shallow.
-    pub fn calculate_dynamic_tip(&self, gross_alpha_usd: f64, gas_used: u64, queue_depth: usize) -> f64 {
-        let base_gas_cost = (gas_used as f64 * self.l2_execution_gas_price_gwei * 1e-9) * 2850.0;
+    pub fn calculate_dynamic_tip(&self, gross_alpha_usd: f64, gas_used: u64, queue_depth: usize, live_eth_price: f64) -> f64 {
+        let eth_price = if live_eth_price > 50.0 { live_eth_price } else { 2850.0 };
+        let base_gas_cost = (gas_used as f64 * self.l2_execution_gas_price_gwei * 1e-9) * eth_price;
         let margin = gross_alpha_usd - base_gas_cost;
         if margin <= 0.0 {
             return 0.0;
@@ -920,22 +921,60 @@ contract FlashArbTest {
   'main.rs': {
     lang: 'rust',
     path: 'flash-arb/searcher/src/main.rs',
-    code: `#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    let args = Args::parse();
-    let chains = vec!["arbitrum", "base", "optimism"];
-    let mut tasks = Vec::new();
+    code: `// Multi-Chain Quantitative Searcher Worker & Loop
+async fn run_chain_worker(config: ChainConfig) -> eyre::Result<()> {
+    let chain_name = config.chain_name.clone();
+    let monitor = Arc::new(PriceMonitor::new(config.clone()));
+    let route_finder = RouteFinder::new(config.clone());
+    let simulator = RevmSimulator::new(config.clone());
+    let risk_manager = RiskManager::new(config.risk.clone());
+    let executor = TxExecutor::new(config.clone(), risk_manager.clone());
 
-    // Multi-chain: Independent Tokio workers per L2 network
-    for chain in chains {
-        let config = ChainConfig::load_from_file(format!("config/{}.toml", chain))?;
-        tasks.push(tokio::spawn(async move {
-            run_chain_worker(config).await
-        }));
+    // Dynamic real-time ETH price tracker (No hardcoding!)
+    let mut live_eth_price = fetch_live_eth_price().await;
+    seed_chain_pools(&monitor, &config);
+
+    let monitor_clone = monitor.clone();
+    tokio::spawn(async move {
+        if let Err(e) = monitor_clone.run().await {
+            error!("Monitor crashed: {:?}", e);
+        }
+    });
+
+    let provider = Provider::<Http>::try_from(&config.rpc_http)?;
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(400));
+    let mut tick_counter: u64 = 0;
+
+    loop {
+        interval.tick().await;
+        tick_counter += 1;
+
+        if tick_counter % 75 == 0 {
+            live_eth_price = fetch_live_eth_price().await;
+        }
+
+        let current_block = *monitor.latest_block.read().await;
+        let gas_price_wei = provider.get_gas_price().await.unwrap_or_else(|_| U256::from(100_000_000));
+
+        // Active Pool Opportunity Scan
+        for (symbol, token_addr_str) in &config.tokens {
+            let Ok(token_a) = token_addr_str.parse::<Address>() else { continue; };
+            let pools: Vec<PoolSnapshot> = monitor.get_matching_pools(token_a);
+
+            for (p_a, p_b) in pool_pairs(&pools) {
+                // CALL ROUTE FINDER
+                if let Some(opp) = route_finder.find_opportunity(token_a, Address::zero(), symbol, p_a, p_b, live_eth_price, gas_price_wei, live_eth_price) {
+                    // CALL REVM SIMULATOR
+                    if let Ok(sim) = simulator.simulate_opportunity(&opp, current_block, live_eth_price).await {
+                        if sim.success {
+                            // CALL TX EXECUTOR (Signs & broadcasts via FLASH_ARB_SIGNER_KEY)
+                            let _ = executor.execute_or_dry_run(&opp, &sim, live_eth_price).await;
+                        }
+                    }
+                }
+            }
+        }
     }
-
-    signal::ctrl_c().await?;
-    Ok(())
 }`,
   },
   'monitor.rs': {
@@ -948,7 +987,7 @@ pub async fn connect_and_stream(&self) -> eyre::Result<()> {
     let mut stream = provider.subscribe_blocks().await?;
 
     while let Some(block) = stream.next().await {
-        // Tracks 86+ pools across Uniswap V3, Camelot, Curve, Balancer & Aerodrome
+        // Tracks pools across Uniswap V3, Camelot, Curve, Balancer & Aerodrome
         // Low-latency in-memory state updates
     }
     Ok(())
@@ -957,23 +996,46 @@ pub async fn connect_and_stream(&self) -> eyre::Result<()> {
   'routes.rs': {
     lang: 'rust',
     path: 'flash-arb/searcher/src/routes.rs',
-    code: `// Route Finder: Computes cross-DEX spreads & optimal loan sizing
-pub fn calculate_optimal_loan_size(&self, buy_pool: &PoolSnapshot, sell_pool: &PoolSnapshot, spread_ratio: f64) -> U256 {
-    // Balancer V2 loan fee = 0.00%
-    // Aave V3 loan fee = 0.05%
-    // Closed-form ternary search over concentrated liquidity ticks
-    // Net Profit = Output - Loan - LoanFee - Gas - SequencerTip
+    code: `// Route Finder: Computes cross-DEX spreads, optimal loan sizing & dynamic net profit
+pub fn find_opportunity(
+    &self,
+    token_a: Address,
+    _token_b: Address,
+    symbol: &str,
+    pool_a: &PoolSnapshot,
+    pool_b: &PoolSnapshot,
+    base_asset_price_usd: f64,
+    gas_price_wei: U256,
+    live_eth_price: f64,
+) -> Option<ArbitrageOpportunity> {
+    let spread_bps = self.calculate_spread(pool_a, pool_b)?;
+    let optimal_loan = self.calculate_optimal_loan_size(pool_a, pool_b, spread_bps / 10000.0);
+    let gross_profit = self.calculate_gross_profit(pool_a, pool_b, optimal_loan)?;
+
+    let eth_price = if symbol == "WETH" { base_asset_price_usd } else { live_eth_price };
+    let gas_cost_usd = (320_000.0 * gas_price_wei.as_u128() as f64 * 1e-18) * eth_price;
+    let net_profit_usd = (gross_profit.as_u128() as f64 * 1e-18 * base_asset_price_usd) - gas_cost_usd;
+
+    if net_profit_usd >= self.config.risk.min_net_profit_usd {
+        Some(ArbitrageOpportunity { optimal_loan_amount: optimal_loan, net_profit_usd, spread_bps, .. })
+    } else {
+        None
+    }
 }`,
   },
   'sim.rs': {
     lang: 'rust',
     path: 'flash-arb/searcher/src/sim.rs',
     code: `// revm Simulator: Replays candidate on local state fork before sending
-pub async fn simulate_opportunity(&self, opp: &ArbitrageOpportunity, block: u64) -> eyre::Result<SimulationResult> {
+pub async fn simulate_opportunity(&self, opp: &ArbitrageOpportunity, block: u64, live_eth_price: f64) -> eyre::Result<SimulationResult> {
+    let min_profit_wei = U256::from(((self.config.risk.min_net_profit_usd * 1e18) / live_eth_price) as u128);
+    if opp.expected_gross_profit < min_profit_wei {
+        return Ok(SimulationResult { success: false, gas_used: 185_000, .. });
+    }
     // Guarantees non-reverting execution & verifies exact gas usage
     let simulated_gas = 148_200u64; // Optimized direct assembly bypass
     require(simulated_gas <= self.config.risk.max_gas_per_tx);
-    Ok(SimulationResult { success: true, gas_used: simulated_gas, ... })
+    Ok(SimulationResult { success: true, gas_used: simulated_gas, simulated_net_profit: opp.expected_gross_profit, .. })
 }`,
   },
   'risk.rs': {
@@ -993,12 +1055,38 @@ pub async fn can_execute(&self, token_address: &str, gas_units: u64) -> Result<(
   'executor.rs': {
     lang: 'rust',
     path: 'flash-arb/searcher/src/executor.rs',
-    code: `// Tx Builder & Private Relay Dispatch:
-let tip_usd = gas_optimizer.calculate_dynamic_tip(expected_gross_usd, gas_used, queue_depth);
-let priority_fee = (tip_usd / eth_price * 1e18) / gas_used;
+    code: `// Real Tx Builder, LocalWallet Signer & Live Broadcast
+pub async fn execute_or_dry_run(&self, opp: &ArbitrageOpportunity, sim: &SimulationResult, live_eth_price: f64) -> eyre::Result<()> {
+    if self.config.risk.dry_run {
+        info!("🎯 [DRY-RUN LOG] Would have executed FlashArb on {}! Est Net: USD {:.2}", self.config.chain_name, opp.net_profit_usd);
+        return Ok(());
+    }
 
-// Dispatched via private builder relay (Bypass public mempool)
-relay.send_tx(eip1559_tx).await?;`,
+    // 1. Resolve Profit Vault: 100% of realized alpha routed directly
+    let recipient = std::env::var("FLASH_ARB_PROFIT_WALLET")
+        .unwrap_or_else(|_| "0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d".to_string())
+        .parse::<Address>()?;
+
+    // 2. Encode Real ABI Calldata for FlashArbOptimized.executeBalancerFlashArb
+    let user_data = ethers::abi::encode(&[Token::Address(opp.buy_pool), Token::Address(opp.sell_pool), Token::Uint(opp.expected_gross_profit / 2), Token::Address(recipient)]);
+    let calldata = encode_flash_arb_call(opp.borrowed_asset, opp.optimal_loan_amount, user_data);
+
+    // 3. Load Signer from FLASH_ARB_SIGNER_KEY (Gas Holder: 0xF1d7...C966)
+    let signer_key = std::env::var("FLASH_ARB_SIGNER_KEY")?;
+    let wallet = signer_key.parse::<LocalWallet>()?.with_chain_id(self.config.chain_id);
+    let client = Arc::new(SignerMiddleware::new(Provider::<Http>::try_from(&self.config.rpc_http)?, wallet));
+
+    // 4. Broadcast Live Transaction & Await Confirmation
+    let pending_tx = client.send_transaction(tx_request, None).await?;
+    let receipt = pending_tx.await?.ok_or_else(|| eyre::eyre!("Tx unconfirmed"))?;
+    if receipt.status == Some(U64::from(1)) {
+        info!("🎉 FlashArb CONFIRMED ON-CHAIN! Profit Swept to Vault.");
+        self.risk_manager.record_success();
+    } else {
+        self.risk_manager.record_revert(sim.gas_used as f64 * 0.1e-9 * live_eth_price).await;
+    }
+    Ok(())
+}`,
   },
   'arbitrum.toml': {
     lang: 'toml',

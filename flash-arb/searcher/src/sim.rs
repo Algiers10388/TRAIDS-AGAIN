@@ -25,6 +25,7 @@ impl RevmSimulator {
         &self,
         opportunity: &ArbitrageOpportunity,
         current_block: u64,
+        live_eth_price: f64,
     ) -> eyre::Result<SimulationResult> {
         info!(
             "[{}] Running revm local fork simulation for {} (Loan: {} wei) on Block #{}",
@@ -44,8 +45,9 @@ impl RevmSimulator {
             });
         }
 
-        // Validate that expected profit covers minimum profit requirement
-        let min_profit_wei = U256::from((self.config.risk.min_net_profit_usd * 1e18) as u128 / 2800);
+        // Validate that expected profit covers minimum profit requirement dynamically
+        let eth_price_clean = if live_eth_price > 50.0 { live_eth_price } else { 2850.0 };
+        let min_profit_wei = U256::from(((self.config.risk.min_net_profit_usd * 1e18) / eth_price_clean) as u128);
         if opportunity.expected_gross_profit < min_profit_wei {
             warn!(
                 "[{}] Simulation pre-check failed: Gross profit {} < required min {}",

@@ -14,24 +14,37 @@ if (!process.env.FLASH_ARB_PROFIT_WALLET) {
   process.env.FLASH_ARB_PROFIT_WALLET = DEFAULT_PROFIT_WALLET;
 }
 
-const RPC_ENDPOINTS: Record<string, { name: string; rpc: string; explorer: string; chainId: number }> = {
+const RPC_ENDPOINTS: Record<string, {
+  name: string;
+  rpc: string;
+  explorer: string;
+  chainId: number;
+  balancerVault: string;
+  aavePool: string;
+}> = {
   arbitrum: {
     name: 'Arbitrum One',
     rpc: 'https://arb1.arbitrum.io/rpc',
     explorer: 'https://arbiscan.io',
     chainId: 42161,
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   },
   base: {
     name: 'Base L2',
     rpc: 'https://mainnet.base.org',
     explorer: 'https://basescan.org',
     chainId: 8453,
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
   },
   optimism: {
     name: 'Optimism Mainnet',
     rpc: 'https://mainnet.optimism.io',
     explorer: 'https://optimistic.etherscan.io',
     chainId: 10,
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   },
 };
 
@@ -252,4 +265,294 @@ flashArbRouter.delete('/signer-config', (_req: Request, res: Response) => {
     message: 'Signer key cleared from server memory',
     isKeyConfigured: false,
   });
+});
+
+/**
+ * GET /api/flash-arb/contract-status
+ * Inspects on-chain bytecode of the flash arb contract to check if deployed
+ */
+flashArbRouter.get('/contract-status', async (req: Request, res: Response) => {
+  try {
+    const chain = String(req.query.chain || 'arbitrum').toLowerCase();
+    const address = String(req.query.address || '').trim();
+    const rpcInfo = RPC_ENDPOINTS[chain] || RPC_ENDPOINTS.arbitrum;
+
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return res.status(400).json({ success: false, error: 'Invalid EVM contract address' });
+    }
+
+    const resp = await fetch(rpcInfo.rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getCode',
+        params: [address, 'latest'],
+        id: 1,
+      }),
+    });
+    const data = await resp.json();
+    const code = data?.result || '0x';
+    const isDeployed = code !== '0x' && code.length > 2;
+
+    return res.json({
+      success: true,
+      chain,
+      address,
+      isDeployed,
+      bytecodeLength: isDeployed ? (code.length - 2) / 2 : 0,
+      explorerUrl: `${rpcInfo.explorer}/address/${address}#code`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/flash-arb/broadcast
+ * Broadcasts a real signed transaction to Arbitrum/Base/Optimism via the server-configured signer key
+ */
+flashArbRouter.post('/broadcast', async (req: Request, res: Response) => {
+  try {
+    const { chain, to, data, gasLimit } = req.body;
+    const targetChain = String(chain || 'arbitrum').toLowerCase();
+    const rpcInfo = RPC_ENDPOINTS[targetChain] || RPC_ENDPOINTS.arbitrum;
+
+    if (!process.env.FLASH_ARB_SIGNER_KEY) {
+      return res.status(400).json({
+        success: false,
+        error: 'No server-side signer private key configured. Enter private key in Signer Key Config or connect your Web3 wallet.',
+      });
+    }
+
+    // Verify target contract code
+    const codeCheck = await fetch(rpcInfo.rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getCode',
+        params: [to, 'latest'],
+        id: 1,
+      }),
+    });
+    const codeData = await codeCheck.json();
+    const code = codeData?.result || '0x';
+    if (code === '0x' || code.length <= 2) {
+      return res.status(400).json({
+        success: false,
+        error: `Contract ${to} has no deployed bytecode on ${rpcInfo.name}. You must deploy FlashArbOptimized.sol first before executing flash loans.`,
+        isContractUndeployed: true,
+      });
+    }
+
+    const { ethers } = await import('ethers');
+    const provider = new ethers.JsonRpcProvider(rpcInfo.rpc);
+    const wallet = new ethers.Wallet(process.env.FLASH_ARB_SIGNER_KEY, provider);
+
+    const balanceWei = await provider.getBalance(wallet.address);
+    if (balanceWei < 100000000000000n) { // 0.0001 ETH
+      return res.status(400).json({
+        success: false,
+        error: `Insufficient gas balance: ${wallet.address} holds ${ethers.formatEther(balanceWei)} ETH on ${rpcInfo.name}, which is below required gas threshold.`,
+      });
+    }
+
+    const tx = await wallet.sendTransaction({
+      to,
+      data: data || '0x',
+      gasLimit: gasLimit ? BigInt(gasLimit) : 300000n,
+    });
+
+    const receipt = await tx.wait(1);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(500).json({
+        success: false,
+        txHash: tx.hash,
+        error: 'Transaction reverted on-chain.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      txHash: tx.hash,
+      chain: rpcInfo.name,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      explorerUrl: `${rpcInfo.explorer}/tx/${tx.hash}`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'On-chain broadcast failed',
+    });
+  }
+});
+
+/**
+ * GET /api/flash-arb/deploy-payload
+ * Returns compiled bytecode, ABI, and encoded constructor payload for deploying FlashArbOptimized
+ */
+flashArbRouter.get('/deploy-payload', async (req: Request, res: Response) => {
+  try {
+    const chain = String(req.query.chain || 'arbitrum').toLowerCase();
+    const rpcInfo = RPC_ENDPOINTS[chain] || RPC_ENDPOINTS.arbitrum;
+
+    const fs = await import('fs');
+    const path = await import('path');
+    const artifactPath = path.join(process.cwd(), 'flash-arb/contracts/out/FlashArbOptimized.json');
+    if (!fs.existsSync(artifactPath)) {
+      return res.status(500).json({ success: false, error: 'FlashArbOptimized artifact not found' });
+    }
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+    const { ethers } = await import('ethers');
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const constructorArgs = [rpcInfo.balancerVault, rpcInfo.aavePool];
+    const encodedArgs = abiCoder.encode(['address', 'address'], constructorArgs);
+    const deployData = artifact.bytecode + encodedArgs.slice(2);
+
+    return res.json({
+      success: true,
+      chain,
+      chainName: rpcInfo.name,
+      chainId: rpcInfo.chainId,
+      constructorArgs: {
+        balancerVault: rpcInfo.balancerVault,
+        aavePool: rpcInfo.aavePool,
+        profitVault: process.env.FLASH_ARB_PROFIT_WALLET || DEFAULT_PROFIT_WALLET,
+      },
+      bytecodeLength: artifact.bytecode.length,
+      deployData,
+      abi: artifact.abi,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// In-memory registry of active FlashArb contract addresses per chain
+const DEPLOYED_CONTRACTS: Record<string, string> = {
+  arbitrum: '0x38F23f99052672B1089d1369796035D5B8D8D105',
+  base: '0x29B35C83955146bA8fD754B4B96956D245A5661e',
+  optimism: '0x738c8Eb31316b23d9b8A68b0c2658b456C932598',
+};
+
+/**
+ * GET /api/flash-arb/deployed-contracts
+ * Returns the currently active FlashArb contract addresses across all supported chains
+ */
+flashArbRouter.get('/deployed-contracts', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    contracts: DEPLOYED_CONTRACTS,
+  });
+});
+
+/**
+ * POST /api/flash-arb/deployed-contracts
+ * Updates the active contract address for a specific chain
+ */
+flashArbRouter.post('/deployed-contracts', (req: Request, res: Response) => {
+  const { chain, address } = req.body;
+  const targetChain = String(chain || 'arbitrum').toLowerCase();
+  if (!address || !/^0x[a-fA-F0-9]{40}$/i.test(String(address).trim())) {
+    return res.status(400).json({ success: false, error: 'Invalid EVM contract address format (must be 0x followed by 40 hex chars)' });
+  }
+  DEPLOYED_CONTRACTS[targetChain] = address.trim();
+  return res.json({
+    success: true,
+    chain: targetChain,
+    contractAddress: DEPLOYED_CONTRACTS[targetChain],
+    contracts: DEPLOYED_CONTRACTS,
+  });
+});
+
+/**
+ * POST /api/flash-arb/deploy-contract
+ * Autonomous Deployment Agent: Signs & broadcasts contract creation on the selected chain
+ */
+flashArbRouter.post('/deploy-contract', async (req: Request, res: Response) => {
+  try {
+    const { chain, privateKey: reqPrivateKey } = req.body;
+    const targetChain = String(chain || 'arbitrum').toLowerCase();
+    const rpcInfo = RPC_ENDPOINTS[targetChain] || RPC_ENDPOINTS.arbitrum;
+
+    const fs = await import('fs');
+    const path = await import('path');
+    const artifactPath = path.join(process.cwd(), 'flash-arb/contracts/out/FlashArbOptimized.json');
+    if (!fs.existsSync(artifactPath)) {
+      return res.status(500).json({ success: false, error: 'FlashArbOptimized artifact not found on disk' });
+    }
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+
+    const { ethers } = await import('ethers');
+
+    const signerKey = reqPrivateKey || process.env.FLASH_ARB_SIGNER_KEY;
+
+    if (!signerKey) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const encodedArgs = abiCoder.encode(['address', 'address'], [rpcInfo.balancerVault, rpcInfo.aavePool]);
+      const deployData = artifact.bytecode + encodedArgs.slice(2);
+
+      return res.json({
+        success: false,
+        requiresWallet: true,
+        message: 'No server signer key configured. Deploy via connected Web3 wallet (MetaMask / OKX).',
+        deployData,
+        chain: targetChain,
+        chainName: rpcInfo.name,
+        chainId: rpcInfo.chainId,
+        rpcUrl: rpcInfo.rpc,
+        explorer: rpcInfo.explorer,
+        constructorArgs: [rpcInfo.balancerVault, rpcInfo.aavePool],
+      });
+    }
+
+    const provider = new ethers.JsonRpcProvider(rpcInfo.rpc);
+    const cleanKey = signerKey.startsWith('0x') ? signerKey : `0x${signerKey}`;
+    const wallet = new ethers.Wallet(cleanKey, provider);
+
+    const balanceWei = await provider.getBalance(wallet.address);
+    const minRequiredWei = 100000000000000n; // 0.0001 ETH
+    if (balanceWei < minRequiredWei) {
+      return res.status(400).json({
+        success: false,
+        error: `Deployer wallet ${wallet.address} has ${ethers.formatEther(balanceWei)} ETH on ${rpcInfo.name}. Contract deployment requires ~0.0003 ETH for L2 gas. Please fund ${wallet.address} or deploy with your connected wallet.`,
+        deployerAddress: wallet.address,
+        balanceEth: ethers.formatEther(balanceWei),
+      });
+    }
+
+    const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, wallet);
+    const contract = await factory.deploy(rpcInfo.balancerVault, rpcInfo.aavePool);
+
+    const deployTx = contract.deploymentTransaction();
+    const txHash = deployTx ? deployTx.hash : '';
+
+    await contract.waitForDeployment();
+    const contractAddress = await contract.getAddress();
+
+    // Register into active deployed contracts store
+    DEPLOYED_CONTRACTS[targetChain] = contractAddress;
+
+    return res.json({
+      success: true,
+      contractAddress,
+      txHash,
+      chain: targetChain,
+      chainName: rpcInfo.name,
+      deployer: wallet.address,
+      balancerVault: rpcInfo.balancerVault,
+      aavePool: rpcInfo.aavePool,
+      profitVault: process.env.FLASH_ARB_PROFIT_WALLET || DEFAULT_PROFIT_WALLET,
+      explorerUrl: `${rpcInfo.explorer}/address/${contractAddress}`,
+      txExplorerUrl: `${rpcInfo.explorer}/tx/${txHash}`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Contract deployment failed',
+    });
+  }
 });
