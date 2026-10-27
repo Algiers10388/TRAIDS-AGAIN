@@ -65,6 +65,7 @@ import {
   sendOkxTransaction,
   registerWalletListeners,
   connectOkxWallet,
+  waitForTxReceipt,
   OKX_SUPPORTED_CHAINS,
 } from '../services/okxWallet';
 
@@ -93,6 +94,9 @@ export interface ChainMetadata {
   contract: string;
   icon: string;
   currency: string;
+  rpcUrl: string;
+  balancerVault: string;
+  aavePool: string;
 }
 
 export const CHAIN_CONFIG_MAP: Record<'arbitrum' | 'base' | 'optimism', ChainMetadata> = {
@@ -102,9 +106,12 @@ export const CHAIN_CONFIG_MAP: Record<'arbitrum' | 'base' | 'optimism', ChainMet
     chainIdHex: '0xa4b1',
     chainIdDec: 42161,
     explorer: 'https://arbiscan.io',
-    contract: '0x38F23f99052672B1089d1369796035D5B8D8D105',
+    contract: '0x19359c6C418669FCfC46196970814353b8766BE0',
     icon: '🔵',
     currency: 'ETH',
+    rpcUrl: 'https://arb1.arbitrum.io/rpc',
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   },
   base: {
     key: 'base',
@@ -115,6 +122,9 @@ export const CHAIN_CONFIG_MAP: Record<'arbitrum' | 'base' | 'optimism', ChainMet
     contract: '0x29B35C83955146bA8fD754B4B96956D245A5661e',
     icon: '🟡',
     currency: 'ETH',
+    rpcUrl: 'https://mainnet.base.org',
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
   },
   optimism: {
     key: 'optimism',
@@ -125,6 +135,9 @@ export const CHAIN_CONFIG_MAP: Record<'arbitrum' | 'base' | 'optimism', ChainMet
     contract: '0x738c8Eb31316b23d9b8A68b0c2658b456C932598',
     icon: '🔴',
     currency: 'ETH',
+    rpcUrl: 'https://mainnet.optimism.io',
+    balancerVault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+    aavePool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
   },
 };
 
@@ -276,13 +289,40 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
   } | null>(null);
   const [isLoadingGasStatus, setIsLoadingGasStatus] = useState<boolean>(false);
 
+  // Active FlashArb Contract Address per Chain (Customizable & Deployed by Agent)
+  const [deployedContracts, setDeployedContracts] = useState<Record<'arbitrum' | 'base' | 'optimism', string>>(() => {
+    return {
+      arbitrum: localStorage.getItem('flash_arb_contract_arbitrum') || CHAIN_CONFIG_MAP.arbitrum.contract,
+      base: localStorage.getItem('flash_arb_contract_base') || CHAIN_CONFIG_MAP.base.contract,
+      optimism: localStorage.getItem('flash_arb_contract_optimism') || CHAIN_CONFIG_MAP.optimism.contract,
+    };
+  });
+
   // On-Chain Contract Deployment Verification State
   const [contractDeploymentStatus, setContractDeploymentStatus] = useState<Record<string, { isDeployed: boolean; bytecodeLength: number }>>({});
   const [isDeployModalOpen, setIsDeployModalOpen] = useState<boolean>(false);
+  const [deployModalTab, setDeployModalTab] = useState<'AGENT' | 'MANUAL' | 'CLI'>('AGENT');
+
+  // Contract Deployment Agent State
+  const [isDeployingAgent, setIsDeployingAgent] = useState<boolean>(false);
+  const [deployAgentStep, setDeployAgentStep] = useState<string | null>(null);
+  const [deployAgentError, setDeployAgentError] = useState<string | null>(null);
+  const [deployAgentSuccess, setDeployAgentSuccess] = useState<{
+    contractAddress: string;
+    txHash: string;
+    chain: string;
+    chainName: string;
+    explorerUrl: string;
+    txExplorerUrl: string;
+    method: 'SERVER_SIGNER' | 'CONNECTED_WALLET';
+  } | null>(null);
+  const [customContractInput, setCustomContractInput] = useState<string>('');
+  const [customContractError, setCustomContractError] = useState<string | null>(null);
+  const [isVerifyingCustomContract, setIsVerifyingCustomContract] = useState<boolean>(false);
 
   const checkContractDeployment = async (chainKey: 'arbitrum' | 'base' | 'optimism', address?: string) => {
     try {
-      const targetAddr = address || CHAIN_CONFIG_MAP[chainKey].contract;
+      const targetAddr = address || deployedContracts[chainKey] || CHAIN_CONFIG_MAP[chainKey].contract;
       const res = await fetch(`/api/flash-arb/contract-status?chain=${chainKey}&address=${targetAddr}`);
       const data = await res.json();
       if (data.success) {
@@ -293,6 +333,171 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
       }
     } catch (e) {
       console.warn('Failed checking contract deployment:', e);
+    }
+  };
+
+  const registerDeployedContract = async (chainKey: 'arbitrum' | 'base' | 'optimism', newAddress: string) => {
+    const cleanAddr = newAddress.trim();
+    setDeployedContracts((prev) => ({ ...prev, [chainKey]: cleanAddr }));
+    localStorage.setItem(`flash_arb_contract_${chainKey}`, cleanAddr);
+    try {
+      await fetch('/api/flash-arb/deployed-contracts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain: chainKey, address: cleanAddr }),
+      });
+    } catch {}
+
+    if (user?.uid) {
+      try {
+        await persistFlashArbSettings(user.uid, {
+          arbitrumContract: chainKey === 'arbitrum' ? cleanAddr : deployedContracts.arbitrum,
+          baseContract: chainKey === 'base' ? cleanAddr : deployedContracts.base,
+          optimismContract: chainKey === 'optimism' ? cleanAddr : deployedContracts.optimism,
+        });
+      } catch (err) {
+        console.warn('Failed persisting contract to Firestore:', err);
+      }
+    }
+    await checkContractDeployment(chainKey, cleanAddr);
+  };
+
+  const handleSaveCustomContract = async () => {
+    const trimmed = customContractInput.trim();
+    if (!isValidEvmAddress(trimmed)) {
+      setCustomContractError('Invalid address. Must be a 42-character hexadecimal EVM address (0x...)');
+      return;
+    }
+    setCustomContractError(null);
+    setIsVerifyingCustomContract(true);
+    try {
+      await registerDeployedContract(selectedChain, trimmed);
+      setCustomContractInput('');
+      setDeployAgentSuccess({
+        contractAddress: trimmed,
+        txHash: '',
+        chain: selectedChain,
+        chainName: CHAIN_CONFIG_MAP[selectedChain].name,
+        explorerUrl: `${CHAIN_CONFIG_MAP[selectedChain].explorer}/address/${trimmed}`,
+        txExplorerUrl: '',
+        method: 'CONNECTED_WALLET',
+      });
+    } catch (e: any) {
+      setCustomContractError(e.message || 'Failed saving contract');
+    } finally {
+      setIsVerifyingCustomContract(false);
+    }
+  };
+
+  const handleDeployContractAgent = async (preferredMethod?: 'SERVER_SIGNER' | 'CONNECTED_WALLET') => {
+    const cfg = CHAIN_CONFIG_MAP[selectedChain];
+    setIsDeployingAgent(true);
+    setDeployAgentError(null);
+    setDeployAgentSuccess(null);
+
+    // If server signer key is configured and method is not explicitly wallet, attempt autonomous server deployment
+    const tryServerDeploy = preferredMethod === 'SERVER_SIGNER' || (preferredMethod !== 'CONNECTED_WALLET' && isSignerKeyConfigured);
+
+    if (tryServerDeploy) {
+      setDeployAgentStep(`🤖 Initializing Server Deployment Agent for ${cfg.name}...`);
+      try {
+        setDeployAgentStep(`Signing & submitting FlashArbOptimized creation transaction to ${cfg.name} via ${formatShortAddress(gasWalletAddress)}...`);
+        const res = await fetch('/api/flash-arb/deploy-contract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chain: selectedChain }),
+        });
+        const data = await res.json();
+        if (data.success && data.contractAddress) {
+          setDeployAgentStep(`Contract deployed! Registering on-chain address ${formatShortAddress(data.contractAddress)}...`);
+          await registerDeployedContract(selectedChain, data.contractAddress);
+          setDeployAgentSuccess({
+            contractAddress: data.contractAddress,
+            txHash: data.txHash,
+            chain: selectedChain,
+            chainName: cfg.name,
+            explorerUrl: data.explorerUrl,
+            txExplorerUrl: data.txExplorerUrl,
+            method: 'SERVER_SIGNER',
+          });
+          setIsDeployingAgent(false);
+          setDeployAgentStep(null);
+          return;
+        } else if (data.requiresWallet) {
+          setDeployAgentStep(`Server signer not configured. Switching to Connected Web3 Wallet deployment...`);
+        } else {
+          throw new Error(data.error || 'Server deployment failed');
+        }
+      } catch (srvErr: any) {
+        if (!preferredMethod) {
+          console.warn('Server deployment failed, trying connected wallet:', srvErr);
+          setDeployAgentStep(`Server signer note: ${srvErr.message}. Launching Connected Web3 Wallet deployment...`);
+        } else {
+          setDeployAgentError(`Server Agent Deployment Error: ${srvErr.message}`);
+          setIsDeployingAgent(false);
+          setDeployAgentStep(null);
+          return;
+        }
+      }
+    }
+
+    // Connected Web3 Wallet deployment flow
+    try {
+      setDeployAgentStep(`Checking Web3 wallet connection for ${cfg.name}...`);
+      let userAddr = okxConnectedAddress;
+      if (!userAddr) {
+        const conn = await connectOkxWallet();
+        userAddr = conn.address;
+      }
+
+      setDeployAgentStep(`Ensuring Web3 wallet is switched to ${cfg.name} (Chain ID: ${cfg.chainIdDec})...`);
+      const currentCid = await getConnectedChainId();
+      if (currentCid && currentCid.toLowerCase() !== cfg.chainIdHex.toLowerCase()) {
+        await switchOkxChain(cfg.chainIdHex);
+        setWalletChainId(cfg.chainIdHex);
+      }
+
+      setDeployAgentStep(`Fetching compiled EVM bytecode & constructor payload for ${cfg.name}...`);
+      const payloadRes = await fetch(`/api/flash-arb/deploy-payload?chain=${selectedChain}`);
+      const payloadData = await payloadRes.json();
+      if (!payloadData.success || !payloadData.deployData) {
+        throw new Error(payloadData.error || 'Failed to retrieve deploy payload from server');
+      }
+
+      setDeployAgentStep(`Awaiting transaction signature in your Web3 wallet (OKX/MetaMask)...`);
+      const txHash = await sendOkxTransaction({
+        data: payloadData.deployData,
+      });
+
+      setDeployAgentStep(`Contract creation transaction broadcasted! Tx: ${txHash.slice(0, 10)}... Awaiting block confirmation on ${cfg.name}...`);
+
+      const receipt = await waitForTxReceipt(txHash, cfg.rpcUrl);
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Deployment transaction failed or reverted on ${cfg.name}. Tx: ${txHash}`);
+      }
+
+      const deployedAddr = receipt.contractAddress;
+      if (!deployedAddr) {
+        throw new Error(`Contract address not found in transaction receipt. Tx: ${txHash}`);
+      }
+
+      setDeployAgentStep(`Contract confirmed on-chain! Registering address ${deployedAddr}...`);
+      await registerDeployedContract(selectedChain, deployedAddr);
+
+      setDeployAgentSuccess({
+        contractAddress: deployedAddr,
+        txHash,
+        chain: selectedChain,
+        chainName: cfg.name,
+        explorerUrl: `${cfg.explorer}/address/${deployedAddr}`,
+        txExplorerUrl: `${cfg.explorer}/tx/${txHash}`,
+        method: 'CONNECTED_WALLET',
+      });
+    } catch (err: any) {
+      setDeployAgentError(err.message || 'Contract deployment failed');
+    } finally {
+      setIsDeployingAgent(false);
+      setDeployAgentStep(null);
     }
   };
 
@@ -370,11 +575,25 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
     checkContractDeployment('arbitrum');
     checkContractDeployment('base');
     checkContractDeployment('optimism');
+
+    // Sync contracts from server registry
+    fetch('/api/flash-arb/deployed-contracts')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.contracts) {
+          setDeployedContracts((prev) => ({
+            arbitrum: localStorage.getItem('flash_arb_contract_arbitrum') || data.contracts.arbitrum || prev.arbitrum,
+            base: localStorage.getItem('flash_arb_contract_base') || data.contracts.base || prev.base,
+            optimism: localStorage.getItem('flash_arb_contract_optimism') || data.contracts.optimism || prev.optimism,
+          }));
+        }
+      })
+      .catch(() => {});
   }, [gasWalletAddress]);
 
   useEffect(() => {
-    checkContractDeployment(selectedChain);
-  }, [selectedChain]);
+    checkContractDeployment(selectedChain, deployedContracts[selectedChain]);
+  }, [selectedChain, deployedContracts]);
 
   // Sync from Firestore when user is authenticated
   useEffect(() => {
@@ -405,6 +624,19 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
           if (settings.gasWalletLabel) {
             localStorage.setItem('flash_arb_gas_wallet_label', settings.gasWalletLabel);
           }
+        }
+        // Load deployed contract addresses from user's Firestore profile
+        if (settings.arbitrumContract && isValidEvmAddress(settings.arbitrumContract)) {
+          setDeployedContracts((prev) => ({ ...prev, arbitrum: settings.arbitrumContract! }));
+          localStorage.setItem('flash_arb_contract_arbitrum', settings.arbitrumContract);
+        }
+        if (settings.baseContract && isValidEvmAddress(settings.baseContract)) {
+          setDeployedContracts((prev) => ({ ...prev, base: settings.baseContract! }));
+          localStorage.setItem('flash_arb_contract_base', settings.baseContract);
+        }
+        if (settings.optimismContract && isValidEvmAddress(settings.optimismContract)) {
+          setDeployedContracts((prev) => ({ ...prev, optimism: settings.optimismContract! }));
+          localStorage.setItem('flash_arb_contract_optimism', settings.optimismContract);
         }
       }).catch((e) => {
         console.warn('Failed loading flash arb settings:', e);
@@ -658,19 +890,23 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
         setWalletChainId(cfg.chainIdHex);
       }
 
-      // FlashArbOptimized live call payload with recipient address embedded in calldata
+      const targetContract = deployedContracts[targetChainKey] || cfg.contract;
+
+      // FlashArbOptimized executeDirectFlashArb(address recipient) live call payload
+      const cleanRecipient = profitWalletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
       const txPayload = {
-        to: cfg.contract,
-        data: `0x3b890989000000000000000000000000${profitWalletAddress.replace('0x', '').padStart(64, '0')}`,
-        gas: '0x493e0',
+        to: targetContract,
+        data: `0x7804d9ac${cleanRecipient}`,
+        gas: '0x30d40',
       };
 
       // Check on-chain deployment status before dispatching
       const isContractLive = contractDeploymentStatus[targetChainKey]?.isDeployed;
       if (isContractLive === false) {
         setLiveExecutionError(
-          `On-Chain Broadcast Halted: FlashArb contract ${cfg.contract} is not yet deployed on ${cfg.name} (bytecode is 0x). You must deploy FlashArbOptimized.sol to ${cfg.name} first.`
+          `On-Chain Broadcast Halted: FlashArb contract ${formatShortAddress(targetContract)} is not yet deployed on ${cfg.name} (bytecode is 0x). Opening Contract Deployment Agent to deploy FlashArbOptimized.sol now.`
         );
+        setIsDeployModalOpen(true);
         setIsExecutingLiveTrade(false);
         return;
       }
@@ -693,7 +929,7 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 chain: targetChainKey,
-                to: cfg.contract,
+                to: targetContract,
                 data: txPayload.data,
                 gasLimit: 300000,
               }),
@@ -1112,6 +1348,7 @@ RPC_BASE_WS=wss://base-mainnet.public.blastapi.io
           {(['arbitrum', 'base', 'optimism'] as const).map((chainKey) => {
             const cfg = CHAIN_CONFIG_MAP[chainKey];
             const isSelected = selectedChain === chainKey;
+            const isDeployed = contractDeploymentStatus[chainKey]?.isDeployed;
             return (
               <button
                 key={chainKey}
@@ -1125,10 +1362,35 @@ RPC_BASE_WS=wss://base-mainnet.public.blastapi.io
               >
                 <span>{cfg.icon}</span>
                 <span>{cfg.name}</span>
-                <span className="text-[10px] text-slate-500">({cfg.chainIdDec})</span>
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${isDeployed ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                  title={isDeployed ? `${cfg.name}: Contract Deployed` : `${cfg.name}: Contract Not Deployed`}
+                />
               </button>
             );
           })}
+
+          {/* Quick Deploy Agent Action Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setDeployAgentError(null);
+              setDeployAgentSuccess(null);
+              setIsDeployModalOpen(true);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md ${
+              contractDeploymentStatus[selectedChain]?.isDeployed
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950'
+            }`}
+          >
+            <Bot className="h-3.5 w-3.5" />
+            <span>
+              {contractDeploymentStatus[selectedChain]?.isDeployed
+                ? `Contract Deployed (${formatShortAddress(deployedContracts[selectedChain])})`
+                : `🤖 Deploy to ${targetChainConfig.name.split(' ')[0]}`}
+            </span>
+          </button>
         </div>
 
         {/* Right: Connected Wallet Chain Verification & 1-Click Auto Switch */}
@@ -1732,89 +1994,391 @@ RPC_BASE_WS=wss://base-mainnet.public.blastapi.io
           </div>
         )}
 
-        {/* CONTRACT DEPLOYMENT GUIDE MODAL */}
+        {/* CONTRACT DEPLOYMENT AGENT MODAL */}
         {isDeployModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative font-mono">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl relative font-mono max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-                    <Code2 className="h-5 w-5" />
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-cyan-400">
+                    <Bot className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                      Deploy FlashArbOptimized.sol to {targetChainConfig.name}
+                    <h3 className="text-base font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <span>FlashArb Deployment Agent</span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                        {targetChainConfig.name}
+                      </span>
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Why Explorer Shows "Transaction Not Found": The contract bytecode must be deployed first.
+                      Deploy compiled <code className="text-cyan-300 font-bold">FlashArbOptimized.sol</code> bytecode to {targetChainConfig.name}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsDeployModalOpen(false)}
-                  className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer"
+                  onClick={() => {
+                    if (!isDeployingAgent) {
+                      setIsDeployModalOpen(false);
+                      setDeployAgentError(null);
+                    }
+                  }}
+                  className="text-slate-400 hover:text-white text-lg p-1 cursor-pointer transition-colors"
                 >
                   ✕
                 </button>
               </div>
 
-              <div className="space-y-3 text-xs">
-                <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 space-y-1 font-sans">
-                  <div className="text-amber-300 font-bold flex items-center gap-1.5">
-                    <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                    <span>Real On-Chain Execution Prerequisite</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Arbitrum One and Arbiscan cannot execute transactions to an address where no smart contract bytecode is deployed (current code is <code className="text-amber-300 font-mono">0x</code>). Deploying the contract publishes the compiled EVM bytecode so flash loans and token swaps can execute on-chain.
-                  </p>
-                </div>
+              {/* Modal Subtabs */}
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDeployModalTab('AGENT')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    deployModalTab === 'AGENT'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  <span>1-Click Agent Deploy</span>
+                </button>
 
-                <div className="space-y-2 font-mono">
-                  <div className="flex justify-between items-center text-slate-300 text-xs">
-                    <span className="font-bold text-cyan-300">Option 1: One-Command Foundry CLI Deployment</span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyCode(`cd flash-arb/contracts\nforge create src/FlashArbOptimized.sol:FlashArbOptimized \\\n  --rpc-url https://arb1.arbitrum.io/rpc \\\n  --private-key ${isSignerKeyConfigured ? 'YOUR_CONFIGURED_PRIVATE_KEY' : '0x...'} \\\n  --constructor-args 0xBA12222222228d8Ba445958a75a0704d566BF2C8 ${profitWalletAddress}`, 'deploy-cmd')}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
-                    >
-                      {copiedKey === 'deploy-cmd' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                      <span>Copy Command</span>
-                    </button>
-                  </div>
-                  <pre className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-cyan-200 overflow-x-auto select-all">
-{`cd flash-arb/contracts
-forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
-  --rpc-url https://arb1.arbitrum.io/rpc \\
-  --private-key ${isSignerKeyConfigured ? '<YOUR_CONFIGURED_SIGNER_KEY>' : '<GAS_WALLET_PRIVATE_KEY>'} \\
-  --constructor-args 0xBA12222222228d8Ba445958a75a0704d566BF2C8 ${profitWalletAddress}`}
-                  </pre>
-                  <p className="text-[10px] text-slate-400 font-sans">
-                    Balancer V2 Vault: <code className="text-emerald-400 font-mono">0xBA12222222228d8Ba445958a75a0704d566BF2C8</code> &bull; Profit Recipient: <code className="text-emerald-400 font-mono">{formatShortAddress(profitWalletAddress)}</code>
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeployModalTab('MANUAL')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    deployModalTab === 'MANUAL'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  <span>Custom Address</span>
+                </button>
 
-                <div className="space-y-1 text-[11px] font-sans text-slate-400 border-t border-slate-800 pt-2">
-                  <div className="font-bold text-slate-200">Option 2: Remix IDE (Browser)</div>
-                  <p>
-                    1. Open <a href="https://remix.ethereum.org" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Remix</a> and paste <code className="text-cyan-300 font-mono">FlashArbOptimized.sol</code> from the Suite ZIP.
-                  </p>
-                  <p>
-                    2. Select Injected Provider (MetaMask/OKX) on Arbitrum One network.
-                  </p>
-                  <p>
-                    3. Pass Balancer Vault and your Profit Vault (<code className="text-emerald-300 font-mono">{profitWalletAddress}</code>) into constructor args, and click Deploy.
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeployModalTab('CLI')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    deployModalTab === 'CLI'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>Foundry CLI & Remix</span>
+                </button>
               </div>
 
-              <div className="flex items-center justify-end pt-2 border-t border-slate-800">
+              {/* TAB 1: ONE-CLICK AGENT DEPLOY */}
+              {deployModalTab === 'AGENT' && (
+                <div className="space-y-4 text-xs">
+                  {/* Status Banner */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Target Network</div>
+                      <div className="text-white font-bold flex items-center gap-1.5">
+                        <span>{targetChainConfig.icon}</span>
+                        <span>{targetChainConfig.name}</span>
+                        <span className="text-[10px] text-slate-400">({targetChainConfig.chainIdDec})</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Bytecode On-Chain Status</div>
+                      {contractDeploymentStatus[selectedChain]?.isDeployed ? (
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1 text-[11px]">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          <span>Bytecode Verified Live</span>
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 text-[11px]">
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                          <span>Bytecode Not Deployed (0x)</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Active Contract Address</div>
+                      <div className="flex items-center gap-1.5">
+                        <code className="text-cyan-300 font-bold select-all">
+                          {formatShortAddress(deployedContracts[selectedChain] || targetChainConfig.contract)}
+                        </code>
+                        <a
+                          href={`${targetChainConfig.explorer}/address/${deployedContracts[selectedChain] || targetChainConfig.contract}#code`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 hover:text-cyan-300"
+                          title="View on block explorer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Constructor Parameters Overview */}
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold flex items-center justify-between">
+                      <span>Constructor Invariants & Beneficiary Destinations:</span>
+                      <span className="text-emerald-400 text-[10px]">100% Non-Custodial</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                      <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                        <div className="text-[10px] text-slate-500">Balancer V2 Vault (0% Fee)</div>
+                        <div className="text-cyan-300 truncate" title={targetChainConfig.balancerVault}>{formatShortAddress(targetChainConfig.balancerVault)}</div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                        <div className="text-[10px] text-slate-500">Aave V3 Fallback Pool</div>
+                        <div className="text-cyan-300 truncate" title={targetChainConfig.aavePool}>{formatShortAddress(targetChainConfig.aavePool)}</div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-900 border border-emerald-500/30">
+                        <div className="text-[10px] text-emerald-400">Profit Destination Vault</div>
+                        <div className="text-emerald-300 font-bold truncate" title={profitWalletAddress}>{formatShortAddress(profitWalletAddress)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step Progress Display */}
+                  {isDeployingAgent && (
+                    <div className="p-4 rounded-xl bg-cyan-950/60 border border-cyan-500/60 space-y-2 animate-in fade-in">
+                      <div className="flex items-center gap-2 text-cyan-300 font-bold">
+                        <Loader2 className="h-4 w-4 animate-spin text-cyan-400" />
+                        <span>Autonomous Deployment Agent in Progress...</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-sans leading-relaxed">
+                        {deployAgentStep || 'Communicating with RPC and preparing contract creation transaction...'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Error Notification */}
+                  {deployAgentError && (
+                    <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/60 text-rose-300 space-y-1.5 animate-in fade-in">
+                      <div className="font-bold flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                        <span>Deployment Error</span>
+                      </div>
+                      <p className="text-[11px] text-rose-200/90 font-sans">{deployAgentError}</p>
+                    </div>
+                  )}
+
+                  {/* Success Notification */}
+                  {deployAgentSuccess && (
+                    <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/70 text-emerald-300 space-y-2.5 animate-in fade-in">
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="flex items-center gap-1.5 text-sm">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                          <span>FlashArb Contract Successfully Deployed On-Chain!</span>
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          {deployAgentSuccess.chainName}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5 text-[11px] text-slate-200 font-mono">
+                        <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-slate-400">Deployed Contract Address:</span>
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <span className="text-cyan-300 select-all">{deployAgentSuccess.contractAddress}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCode(deployAgentSuccess.contractAddress, 'deployed-addr')}
+                              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                            >
+                              {copiedKey === 'deployed-addr' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                            </button>
+                            <a
+                              href={deployAgentSuccess.explorerUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded bg-slate-800 text-cyan-400 hover:text-cyan-300"
+                              title="View Contract on Block Explorer"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
+                        </div>
+
+                        {deployAgentSuccess.txHash && (
+                          <div className="flex justify-between items-center p-2 rounded-lg bg-slate-900 border border-slate-800">
+                            <span className="text-slate-400">Deployment Transaction:</span>
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <span className="text-white select-all">{formatShortAddress(deployAgentSuccess.txHash)}</span>
+                              <a
+                                href={deployAgentSuccess.txExplorerUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1 rounded bg-slate-800 text-cyan-400 hover:text-cyan-300"
+                                title="View Tx on Block Explorer"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-emerald-200 font-sans">
+                        Contract is registered in application state, synced to Firestore, and ready to execute live flash loan trades!
+                      </p>
+
+                      <div className="pt-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsDeployModalOpen(false);
+                            setActiveSubTab('SIMULATOR');
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer shadow-lg transition-all"
+                        >
+                          Ready to Execute Trades &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dual Deployment Actions (Available when not currently deploying) */}
+                  {!isDeployingAgent && !deployAgentSuccess && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {/* Option A: Server Signer Agent */}
+                      <button
+                        type="button"
+                        onClick={() => handleDeployContractAgent('SERVER_SIGNER')}
+                        className="p-4 rounded-xl border border-cyan-500/40 bg-gradient-to-br from-cyan-950/40 to-slate-900 hover:border-cyan-400 text-left transition-all cursor-pointer group shadow-lg"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                            <Zap className="h-4 w-4 fill-current text-cyan-400" />
+                            <span>1. Deploy via Server Agent</span>
+                          </span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isSignerKeyConfigured ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'}`}>
+                            {isSignerKeyConfigured ? 'Key Ready' : 'Key Needed'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-sans leading-relaxed">
+                          Autonomous deployment signed by gas funder <code className="text-amber-300 font-mono">{formatShortAddress(gasWalletAddress)}</code> directly through {targetChainConfig.name} RPC.
+                        </p>
+                      </button>
+
+                      {/* Option B: Connected Web3 Wallet */}
+                      <button
+                        type="button"
+                        onClick={() => handleDeployContractAgent('CONNECTED_WALLET')}
+                        className="p-4 rounded-xl border border-indigo-500/40 bg-gradient-to-br from-indigo-950/40 to-slate-900 hover:border-indigo-400 text-left transition-all cursor-pointer group shadow-lg"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                            <Wallet className="h-4 w-4 text-indigo-400" />
+                            <span>2. Deploy via Web3 Wallet</span>
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">
+                            MetaMask / OKX
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-sans leading-relaxed">
+                          Pops up your browser wallet to sign contract creation bytecode on {targetChainConfig.name}. Auto-monitors receipt and saves address.
+                        </p>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: MANUAL EXISTING CONTRACT ADDRESS */}
+              {deployModalTab === 'MANUAL' && (
+                <div className="space-y-4 text-xs">
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 font-sans">
+                    <span className="text-xs font-bold text-white block font-mono">
+                      Already have a deployed FlashArb contract on {targetChainConfig.name}?
+                    </span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Enter the EVM address below. The system will inspect its on-chain bytecode via JSON-RPC, verify it against {targetChainConfig.name}, and update your active execution route.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5 font-mono">
+                    <label className="text-xs text-slate-300 font-bold block">
+                      Contract Address on {targetChainConfig.name}
+                    </label>
+                    <input
+                      type="text"
+                      value={customContractInput}
+                      onChange={(e) => {
+                        setCustomContractInput(e.target.value);
+                        if (customContractError) setCustomContractError(null);
+                      }}
+                      placeholder="0x..."
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none"
+                    />
+                  </div>
+
+                  {customContractError && (
+                    <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-300 text-xs flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>{customContractError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      disabled={isVerifyingCustomContract || !customContractInput.trim()}
+                      onClick={handleSaveCustomContract}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 font-bold text-xs cursor-pointer shadow-lg disabled:opacity-50 transition-all flex items-center gap-1.5"
+                    >
+                      {isVerifyingCustomContract ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      <span>Save & Verify Address</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: FOUNDRY CLI & REMIX REFERENCE */}
+              {deployModalTab === 'CLI' && (
+                <div className="space-y-3 text-xs">
+                  <div className="space-y-2 font-mono">
+                    <div className="flex justify-between items-center text-slate-300 text-xs">
+                      <span className="font-bold text-cyan-300">Foundry CLI One-Command Deploy:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCode(`cd flash-arb/contracts\nforge create src/FlashArbOptimized.sol:FlashArbOptimized \\\n  --rpc-url ${targetChainConfig.rpcUrl} \\\n  --private-key ${isSignerKeyConfigured ? 'YOUR_CONFIGURED_PRIVATE_KEY' : '0x...'} \\\n  --constructor-args ${targetChainConfig.balancerVault} ${targetChainConfig.aavePool}`, 'deploy-cmd')}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedKey === 'deploy-cmd' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                        <span>Copy Command</span>
+                      </button>
+                    </div>
+                    <pre className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-cyan-200 overflow-x-auto select-all">
+{`cd flash-arb/contracts
+forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
+  --rpc-url ${targetChainConfig.rpcUrl} \\
+  --private-key ${isSignerKeyConfigured ? '<YOUR_CONFIGURED_SIGNER_KEY>' : '<GAS_WALLET_PRIVATE_KEY>'} \\
+  --constructor-args ${targetChainConfig.balancerVault} ${targetChainConfig.aavePool}`}
+                    </pre>
+                  </div>
+
+                  <div className="space-y-1 text-[11px] font-sans text-slate-400 border-t border-slate-800 pt-2">
+                    <div className="font-bold text-slate-200">Remix IDE Steps:</div>
+                    <p>1. Open <a href="https://remix.ethereum.org" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Remix</a> and load <code className="text-cyan-300 font-mono">FlashArbOptimized.sol</code>.</p>
+                    <p>2. Select Injected Provider (OKX / MetaMask) connected to {targetChainConfig.name}.</p>
+                    <p>3. Pass Balancer Vault (<code className="text-cyan-300 font-mono">{formatShortAddress(targetChainConfig.balancerVault)}</code>) and Aave Pool (<code className="text-cyan-300 font-mono">{formatShortAddress(targetChainConfig.aavePool)}</code>), click Deploy, then paste address into the Custom Address tab.</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                <div className="text-[10px] text-slate-500 font-sans">
+                  Explorer: <a href={targetChainConfig.explorer} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{targetChainConfig.explorer.replace('https://', '')}</a>
+                </div>
                 <button
                   type="button"
                   onClick={() => setIsDeployModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer shadow-lg transition-all"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer shadow-md transition-all"
                 >
-                  Got It
+                  Close
                 </button>
               </div>
             </div>
@@ -2762,9 +3326,11 @@ forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
                   <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-400">Target Contract:</span>
-                      <code className="text-cyan-300 font-bold select-all">{formatShortAddress(targetChainConfig.contract)}</code>
+                      <code className="text-cyan-300 font-bold select-all">
+                        {formatShortAddress(deployedContracts[selectedChain] || targetChainConfig.contract)}
+                      </code>
                       <a
-                        href={`${targetChainConfig.explorer}/address/${targetChainConfig.contract}#code`}
+                        href={`${targetChainConfig.explorer}/address/${deployedContracts[selectedChain] || targetChainConfig.contract}#code`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-cyan-400 hover:text-cyan-300"
@@ -2776,10 +3342,23 @@ forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
 
                     <div className="flex items-center gap-2">
                       {contractDeploymentStatus[selectedChain]?.isDeployed ? (
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                          Bytecode Verified Live on {targetChainConfig.name.split(' ')[0]}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                            Bytecode Verified Live on {targetChainConfig.name.split(' ')[0]}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeployAgentError(null);
+                              setDeployAgentSuccess(null);
+                              setIsDeployModalOpen(true);
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold border border-slate-700 cursor-pointer"
+                          >
+                            Manage
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
                           <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
@@ -2788,10 +3367,15 @@ forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
                           </span>
                           <button
                             type="button"
-                            onClick={() => setIsDeployModalOpen(true)}
-                            className="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-[10px] font-bold border border-cyan-400/30 cursor-pointer"
+                            onClick={() => {
+                              setDeployAgentError(null);
+                              setDeployAgentSuccess(null);
+                              setIsDeployModalOpen(true);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-[10px] font-bold shadow-md cursor-pointer flex items-center gap-1"
                           >
-                            Deployment Guide
+                            <Bot className="h-3 w-3" />
+                            <span>Deploy Agent</span>
                           </button>
                         </div>
                       )}
@@ -2845,7 +3429,20 @@ forge create src/FlashArbOptimized.sol:FlashArbOptimized \\
 
                   {/* Broadcast Trigger Button */}
                   <div className="pt-1">
-                    {!okxConnectedAddress ? (
+                    {!contractDeploymentStatus[selectedChain]?.isDeployed ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeployAgentError(null);
+                          setDeployAgentSuccess(null);
+                          setIsDeployModalOpen(true);
+                        }}
+                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-cyan-500 hover:from-amber-400 hover:to-cyan-400 text-slate-950 font-mono font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xl shadow-orange-500/25 transition-all"
+                      >
+                        <Bot className="h-4 w-4" />
+                        <span>Deploy FlashArb Contract to {targetChainConfig.name} to Enable Live Trades</span>
+                      </button>
+                    ) : !okxConnectedAddress ? (
                       <button
                         type="button"
                         onClick={onOpenOkxWallet}

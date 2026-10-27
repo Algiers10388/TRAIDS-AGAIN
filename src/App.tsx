@@ -455,15 +455,31 @@ export default function App() {
     };
   }, [selectedSymbol]);
 
+  // Active asset & candles
+  const activeAsset = useMemo(
+    () => assets.find((a) => a.symbol === selectedSymbol) || assets[0],
+    [assets, selectedSymbol]
+  );
+
+  const activeCandles = useMemo(
+    () => candleMap[selectedSymbol] || generateInitialCandles(activeAsset?.price || 100, 0.015, 60),
+    [candleMap, selectedSymbol, activeAsset]
+  );
+
   // Real-time live exchange order book quotes state
-  const [exchangeQuotes, setExchangeQuotes] = useState<ExchangeQuote[]>([]);
+  const [exchangeQuotes, setExchangeQuotes] = useState<ExchangeQuote[]>(() =>
+    generateExchangeQuotes(DEFAULT_ASSETS[0].symbol, DEFAULT_ASSETS[0].price, DEFAULT_EXCHANGES)
+  );
 
   // Poll Real Live Multi-Exchange Quotes (Direct order books)
   useEffect(() => {
+    if (activeAsset?.price) {
+      setExchangeQuotes(generateExchangeQuotes(selectedSymbol, activeAsset.price, exchanges));
+    }
     let isMounted = true;
     const pollLiveQuotes = async () => {
       try {
-        const quotes = await fetchLiveExchangeQuotes(selectedSymbol, activeAsset.price, exchanges);
+        const quotes = await fetchLiveExchangeQuotes(selectedSymbol, activeAsset?.price, exchanges);
         if (quotes && quotes.length > 0 && isMounted) {
           setExchangeQuotes(quotes);
         }
@@ -479,7 +495,7 @@ export default function App() {
       isMounted = false;
       clearInterval(quotesInterval);
     };
-  }, [selectedSymbol]);
+  }, [selectedSymbol, activeAsset?.price]);
 
   // Trading Mode Toggle Handlers
   const handleToggleTradingMode = (newMode: TradingExecutionMode) => {
@@ -507,17 +523,6 @@ export default function App() {
       `[${new Date().toLocaleTimeString()}] 🚨 LIVE REAL TRADING ACTIVATED: Cash strictly synchronized to verified fiat vault funds ($${fiatAccount.allocatedToTrading.toFixed(2)} USD). Real money at risk!`,
     ]);
   };
-
-  // Active asset & candles
-  const activeAsset = useMemo(
-    () => assets.find((a) => a.symbol === selectedSymbol) || assets[0],
-    [assets, selectedSymbol]
-  );
-
-  const activeCandles = useMemo(
-    () => candleMap[selectedSymbol] || generateInitialCandles(activeAsset?.price || 100, 0.015, 60),
-    [candleMap, selectedSymbol, activeAsset]
-  );
 
   const handleSelectSymbol = (symbol: string) => {
     setSelectedSymbol(symbol);
@@ -811,7 +816,8 @@ export default function App() {
         notional,
         exchangeQuotes,
         exchanges,
-        strategy.routingMode
+        strategy.routingMode,
+        activeAsset?.price
       );
 
       const executedPrice = route.rawPrice;
@@ -954,7 +960,8 @@ export default function App() {
           orderNotional,
           exchangeQuotes,
           exchanges,
-          strategy.routingMode
+          strategy.routingMode,
+          activeAsset?.price
         );
         const executedPrice = route.rawPrice;
         const fee = route.feeAmountUsd;
@@ -1228,14 +1235,22 @@ export default function App() {
       const pos = currentPositions.find((p) => p.id === positionId);
       if (!pos) return currentPositions;
 
+      // Find current market price of the position's symbol if available
+      const matchingAsset = assets.find((a) => a.symbol === pos.symbol);
+      const posBasePrice = matchingAsset?.price || pos.entryPrice;
+
+      // Filter exchange quotes for pos.symbol if available, or pass exchangeQuotes
+      const relevantQuotes = exchangeQuotes.filter((q) => q.symbol === pos.symbol);
+
       // Route sell through optimal exchange
       const route = routeOrderSmart(
         'SELL',
         pos.symbol,
         pos.notional,
-        exchangeQuotes,
+        relevantQuotes.length > 0 ? relevantQuotes : exchangeQuotes,
         exchanges,
-        strategy.routingMode
+        strategy.routingMode,
+        posBasePrice
       );
 
       const executedExitPrice = route.rawPrice;
@@ -1591,7 +1606,8 @@ export default function App() {
                 notional,
                 exchangeQuotes,
                 exchanges,
-                strategy.routingMode
+                strategy.routingMode,
+                activeAsset?.price
               );
 
               const executedPrice = route.rawPrice;

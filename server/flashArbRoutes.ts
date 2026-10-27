@@ -433,7 +433,7 @@ flashArbRouter.get('/deploy-payload', async (req: Request, res: Response) => {
 
 // In-memory registry of active FlashArb contract addresses per chain
 const DEPLOYED_CONTRACTS: Record<string, string> = {
-  arbitrum: '0x38F23f99052672B1089d1369796035D5B8D8D105',
+  arbitrum: '0x19359c6C418669FCfC46196970814353b8766BE0',
   base: '0x29B35C83955146bA8fD754B4B96956D245A5661e',
   optimism: '0x738c8Eb31316b23d9b8A68b0c2658b456C932598',
 };

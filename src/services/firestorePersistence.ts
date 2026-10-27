@@ -185,34 +185,41 @@ export async function persistStrategyToFirestore(
 }
 
 /**
- * Persist Flash Arb configuration (including Profit Recipient Wallet) to Firestore
+ * Persist Flash Arb configuration (including Profit Recipient Wallet and Deployed Contracts) to Firestore
  */
 export async function persistFlashArbSettings(
   userId: string,
   settings: {
-    profitRecipientAddress: string;
+    profitRecipientAddress?: string;
     label?: string;
     gasWalletAddress?: string;
     gasWalletLabel?: string;
     autoExecute?: boolean;
     defaultToken?: string;
+    arbitrumContract?: string;
+    baseContract?: string;
+    optimismContract?: string;
   }
 ): Promise<void> {
   if (!userId) return;
   const path = `users/${userId}/bot_security_settings/flash_arb`;
   try {
     const ref = doc(db, 'users', userId, 'bot_security_settings', 'flash_arb');
-    await setDoc(ref, {
-      ...settings,
-      updatedAt: new Date().toISOString(),
-    });
+    await setDoc(
+      ref,
+      {
+        ...settings,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 /**
- * Load Flash Arb configuration (including Profit Recipient & Gas Funder Wallet) from Firestore
+ * Load Flash Arb configuration (including Profit Recipient, Gas Funder, and Deployed Contracts) from Firestore
  */
 export async function loadFlashArbSettings(
   userId: string
@@ -223,6 +230,9 @@ export async function loadFlashArbSettings(
   gasWalletLabel?: string;
   autoExecute?: boolean;
   defaultToken?: string;
+  arbitrumContract?: string;
+  baseContract?: string;
+  optimismContract?: string;
 } | null> {
   if (!userId) return null;
   const path = `users/${userId}/bot_security_settings/flash_arb`;

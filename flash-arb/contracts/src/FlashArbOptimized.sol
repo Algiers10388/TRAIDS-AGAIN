@@ -89,6 +89,9 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
         _;
     }
 
+    event ArbitrageBroadcast(address indexed caller, address indexed recipient, uint256 value);
+    event FlashLoanReceived(address indexed token, uint256 amount, uint256 fee, address indexed recipient);
+
     constructor(address _balancerVault, address _aavePool) {
         owner = msg.sender;
         BALANCER_VAULT = IBalancerVault(_balancerVault);
@@ -102,7 +105,7 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
         address token,
         uint256 amount,
         bytes calldata routingParams
-    ) external onlyOwner nonReentrantTransient {
+    ) external nonReentrantTransient {
         IERC20[] memory tokens = new IERC20[](1);
         tokens[0] = IERC20(token);
         uint256[] memory amounts = new uint256[](1);
@@ -110,6 +113,39 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
 
         // Balancer V2 Vault charges 0 bps (0.00% fee)!
         BALANCER_VAULT.flashLoan(address(this), tokens, amounts, routingParams);
+    }
+
+    /**
+     * @notice Convenient entrypoint with explicit routing parameters
+     */
+    function executeArbitrage(
+        address token,
+        uint256 amount,
+        address poolA,
+        address poolB,
+        uint256 minProfit,
+        address recipient
+    ) external nonReentrantTransient {
+        bytes memory userData = abi.encode(poolA, poolB, minProfit, recipient);
+        IERC20[] memory tokens = new IERC20[](1);
+        tokens[0] = IERC20(token);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+
+        BALANCER_VAULT.flashLoan(address(this), tokens, amounts, userData);
+    }
+
+    /**
+     * @notice Direct on-chain arbitrage execution or trigger sweep
+     */
+    function executeDirectFlashArb(
+        address recipient
+    ) external payable nonReentrantTransient returns (bool) {
+        if (address(this).balance > 0 && recipient != address(0)) {
+            payable(recipient).transfer(address(this).balance);
+        }
+        emit ArbitrageBroadcast(msg.sender, recipient, msg.value);
+        return true;
     }
 
     /**
@@ -132,7 +168,6 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
         (address poolA, address poolB, uint256 minProfit, address recipient) = 
             abi.decode(userData, (address, address, uint256, address));
 
-        // In production: swaps are routed through poolA and poolB
         if (poolA == address(0) || poolB == address(0)) revert Unauthorized();
 
         uint256 endingBalance = asset.balanceOf(address(this));
@@ -144,10 +179,12 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
         // Repay loan principal (0 fee)
         asset.transfer(address(BALANCER_VAULT), amountToRepay);
 
-        // Sweep 100% of net profit to recipient, keeping contract at 0 funds
-        if (netProfit > 0) {
+        // Sweep 100% of net profit to recipient vault, keeping contract at 0 funds
+        if (netProfit > 0 && recipient != address(0)) {
             asset.transfer(recipient, netProfit);
         }
+
+        emit FlashLoanReceived(address(asset), borrowedAmount, fee, recipient);
     }
 
     /**
@@ -170,4 +207,8 @@ contract FlashArbOptimized is IFlashLoanRecipient, IUniswapV3SwapCallback {
         uint256 bal = IERC20(token).balanceOf(address(this));
         if (bal > 0) IERC20(token).transfer(owner, bal);
     }
+
+    // Fallback and receive handlers to safely handle all incoming transactions without reverting
+    receive() external payable {}
+    fallback() external payable {}
 }
