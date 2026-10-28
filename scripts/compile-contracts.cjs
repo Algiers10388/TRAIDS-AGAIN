@@ -17,6 +17,7 @@ const input = {
       enabled: true,
       runs: 200,
     },
+    viaIR: true,
     evmVersion: 'cancun',
     outputSelection: {
       '*': {
