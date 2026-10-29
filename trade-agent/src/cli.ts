@@ -19,7 +19,7 @@ console.clear();
 console.log('='.repeat(80));
 console.log('   QUANTITATIVE CRYPTO TRADING AGENT - ADVANCED RISK & VOLATILITY ENGINE');
 console.log('='.repeat(80));
-console.log(` Mode:        ${isLive ? '\x1b[31m[LIVE REAL CAPITAL]\x1b[0m' : '\x1b[32m[DRY-RUN PAPER TRADING]\x1b[0m'}`);
+console.log(` Mode:        ${isLive ? '\x1b[31m[LIVE REAL CAPITAL]\x1b[0m' : '\x1b[32m[DRY-RUN SIGNALS ONLY]\x1b[0m'}`);
 console.log(` Exchange:    ${exchangeArg}`);
 console.log(` Strategy:    ${strategyArg}`);
 console.log(` Pairs:       ${symbolsArg.join(', ')}`);

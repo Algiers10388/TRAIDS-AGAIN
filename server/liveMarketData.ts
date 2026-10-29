@@ -536,9 +536,9 @@ export async function fetchLiveTickers(): Promise<{ tickers: LiveTicker[]; sourc
     } else if (nkMatch) {
       price = parseFloat(nkMatch.last_price || nkMatch.bid || nkMatch.ask || '0');
       change24h = parseFloat(nkMatch.change_percent || '0');
-      high24h = parseFloat(nkMatch.high || String(price * 1.05));
-      low24h = parseFloat(nkMatch.low || String(price * 0.95));
-      volume24h = parseFloat(nkMatch.usd_volume_est || '500000');
+      high24h = parseFloat(nkMatch.high || '0');
+      low24h = parseFloat(nkMatch.low || '0');
+      volume24h = parseFloat(nkMatch.usd_volume_est || '0');
     }
 
     if (price > 0) {
@@ -548,17 +548,8 @@ export async function fetchLiveTickers(): Promise<{ tickers: LiveTicker[]; sourc
       if (existing && existing.sparkline && existing.sparkline.length > 0) {
         sparkline = [...existing.sparkline.slice(-14), price];
       } else {
-        const base = low24h > 0 ? low24h : price * 0.98;
-        const top = high24h > 0 ? high24h : price * 1.02;
-        sparkline = [
-          base,
-          base + (top - base) * 0.25,
-          base + (top - base) * 0.45,
-          base + (top - base) * 0.7,
-          top,
-          top - (top - base) * 0.15,
-          price,
-        ];
+        // Only real observed prices go in the sparkline; it fills as the feed is polled.
+        sparkline = [price];
       }
 
       newTickers.push({
@@ -586,42 +577,11 @@ export async function fetchLiveTickers(): Promise<{ tickers: LiveTicker[]; sourc
   }
 
   // Graceful fallback to existing cache or populated baseline
-  if (cachedTickers.length > 0) {
-    return { tickers: cachedTickers, source: 'cached-fallback', timestamp: lastTickerFetchTime };
+  if (cachedTickers.length > 0 && now - lastTickerFetchTime < 60_000) {
+    return { tickers: cachedTickers, source: 'stale-cache', timestamp: lastTickerFetchTime };
   }
 
   return { tickers: [], source: 'empty', timestamp: now };
-}
-
-/**
- * Generates continuous, realistic 1m OHLCV candles connected to a live anchor price
- */
-function generateContinuousCandles(basePrice: number, decimals: number, count = 60): LiveCandle[] {
-  const candles: LiveCandle[] = [];
-  const now = Date.now();
-  let current = basePrice;
-  const timeStep = 60 * 1000;
-
-  for (let i = count - 1; i >= 0; i--) {
-    const time = now - i * timeStep;
-    const jitter = (Math.random() - 0.49) * 0.004; // +/- 0.2%
-    const open = current;
-    const close = Math.max(0.00000001, open * (1 + jitter));
-    const high = Math.max(open, close) * (1 + Math.random() * 0.002);
-    const low = Math.min(open, close) * (1 - Math.random() * 0.002);
-    const volume = Math.round(50000 + Math.random() * 150000);
-
-    candles.push({
-      time,
-      open: Number(open.toFixed(decimals)),
-      high: Number(high.toFixed(decimals)),
-      low: Number(low.toFixed(decimals)),
-      close: Number(close.toFixed(decimals)),
-      volume,
-    });
-    current = close;
-  }
-  return candles;
 }
 
 /**
@@ -710,15 +670,8 @@ export async function fetchLiveCandles(symbol: string): Promise<LiveCandle[]> {
     return cached.candles;
   }
 
-  // Gracefully generate high-fidelity continuous candles from live anchor price
-  const anchorPrice =
-    cachedTickers.find((t) => t.symbol === def.symbol)?.price ||
-    (await fetchLiveExchangeQuotes(symbol)).find((q) => q.lastPrice > 0)?.lastPrice ||
-    100;
-
-  const fallbackCandles = generateContinuousCandles(anchorPrice, def.decimals, 60);
-  candleCache.set(symbol, { candles: fallbackCandles, lastFetched: now });
-  return fallbackCandles;
+  // No synthetic fallback: if no exchange returned candles, report that honestly.
+  throw new Error(`No live candle data available for ${symbol} from any exchange`);
 }
 
 /**
@@ -728,282 +681,117 @@ export async function fetchLiveCandles(symbol: string): Promise<LiveCandle[]> {
 export async function fetchLiveExchangeQuotes(symbol: string): Promise<ExchangeQuoteResult[]> {
   const def = getAssetDefinition(symbol);
   const now = Date.now();
+  const num = (v: any) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  // Published base-tier taker fees, used only for the "effective price" columns.
+  const TAKER = { BINANCE: 0.001, COINBASE: 0.006, KRAKEN: 0.004, BYBIT: 0.001, NONKYC: 0.002 } as const;
 
-  let binanceBid = 0;
-  let binanceAsk = 0;
-  let binanceLast = 0;
-  let binanceDepthBid = 150000;
-  let binanceDepthAsk = 140000;
-  let binanceLatency = 20;
-
-  let krakenBid = 0;
-  let krakenAsk = 0;
-  let krakenLast = 0;
-  let krakenDepthBid = 95000;
-  let krakenDepthAsk = 90000;
-  let krakenLatency = 35;
-
-  let coinbaseBid = 0;
-  let coinbaseAsk = 0;
-  let coinbaseLast = 0;
-  let coinbaseDepthBid = 110000;
-  let coinbaseDepthAsk = 105000;
-  let coinbaseLatency = 30;
-
-  let nonkycBid = 0;
-  let nonkycAsk = 0;
-  let nonkycLast = 0;
-  let nonkycDepthBid = 75000;
-  let nonkycDepthAsk = 70000;
-  let nonkycLatency = 35;
-  let nonkycVolume24h = 8500000;
-
-  // 1. Fetch Binance US live book ticker
-  const bStart = Date.now();
-  try {
-    const bRes = await fetchWithTimeout(
-      `https://api.binance.us/api/v3/ticker/bookTicker?symbol=${def.binanceSymbol}`,
-      {},
-      2500
-    );
-    binanceLatency = Date.now() - bStart;
-    if (bRes.ok) {
-      const bData = await bRes.json();
-      binanceBid = parseFloat(bData.bidPrice);
-      binanceAsk = parseFloat(bData.askPrice);
-      binanceLast = (binanceBid + binanceAsk) / 2;
-      const bQty = parseFloat(bData.bidQty || '1');
-      const aQty = parseFloat(bData.askQty || '1');
-      binanceDepthBid = Math.max(50000, binanceBid * bQty);
-      binanceDepthAsk = Math.max(50000, binanceAsk * aQty);
-    }
-  } catch {}
-
-  // 2. Fetch Kraken live ticker
-  const kStart = Date.now();
-  try {
-    const kRes = await fetchWithTimeout(
-      `https://api.kraken.com/0/public/Ticker?pair=${def.krakenPair}`,
-      {},
-      2500
-    );
-    krakenLatency = Date.now() - kStart;
-    if (kRes.ok) {
-      const kData = await kRes.json();
-      const kKey = Object.keys(kData.result || {}).find(
-        (k) => k === def.krakenKey || k.includes(def.krakenPair.replace('USD', ''))
-      ) || Object.keys(kData.result || {})[0];
-
-      if (kKey && kData.result[kKey]) {
-        const row = kData.result[kKey];
-        krakenAsk = parseFloat(row.a[0]);
-        krakenBid = parseFloat(row.b[0]);
-        krakenLast = parseFloat(row.c[0]);
-        const kVol = parseFloat(row.b[2] || '2');
-        krakenDepthBid = Math.max(40000, krakenBid * kVol);
-        krakenDepthAsk = Math.max(40000, krakenAsk * kVol);
-      }
-    }
-  } catch {}
-
-  // 3. Fetch Coinbase live product ticker
-  const cStart = Date.now();
-  try {
-    const cbRes = await fetchWithTimeout(
-      `https://api.exchange.coinbase.com/products/${def.coinbasePair}/ticker`,
-      { headers: { 'User-Agent': 'CryptoAgent/1.0' } },
-      2500
-    );
-    coinbaseLatency = Date.now() - cStart;
-    if (cbRes.ok) {
-      const cbData = await cbRes.json();
-      coinbaseBid = parseFloat(cbData.bid);
-      coinbaseAsk = parseFloat(cbData.ask);
-      coinbaseLast = parseFloat(cbData.price);
-      const cbVol = parseFloat(cbData.volume || '10');
-      coinbaseDepthBid = Math.max(60000, (coinbaseBid * cbVol) / 24);
-      coinbaseDepthAsk = Math.max(60000, (coinbaseAsk * cbVol) / 24);
-    }
-  } catch {
-    // Try Coinbase v2 spot
-    try {
-      const spotRes = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${def.coinbasePair}/spot`);
-      if (spotRes.ok) {
-        const spotJson = await spotRes.json();
-        const spotPrice = parseFloat(spotJson.data?.amount);
-        if (spotPrice > 0) {
-          coinbaseLast = spotPrice;
-          coinbaseBid = spotPrice * 0.9999;
-          coinbaseAsk = spotPrice * 1.0001;
-        }
-      }
-    } catch {}
-  }
-
-  // 4. Fetch NonKYC live ticker & order book (Zero-KYC spot order book)
-  const nkStart = Date.now();
-  try {
-    const [tRes, obRes] = await Promise.all([
-      fetchWithTimeout(
-        `https://api.nonkyc.io/api/v2/ticker/${def.nonkycPair}`,
-        { headers: { 'User-Agent': 'Mozilla/5.0' } },
-        2500
-      ),
-      fetchWithTimeout(
-        `https://api.nonkyc.io/api/v2/orderbook?ticker_id=${def.nonkycPair}&depth=5`,
-        { headers: { 'User-Agent': 'Mozilla/5.0' } },
-        2500
-      ),
-    ]);
-    nonkycLatency = Date.now() - nkStart;
-
-    if (tRes.ok) {
-      const tData = await tRes.json();
-      if (tData) {
-        nonkycBid = parseFloat(tData.bid || '0');
-        nonkycAsk = parseFloat(tData.ask || '0');
-        nonkycLast = parseFloat(tData.last_price || '0');
-        if (tData.usd_volume_est) {
-          nonkycVolume24h = parseFloat(tData.usd_volume_est);
-        }
-      }
-    }
-
-    if (obRes.ok) {
-      const obData = await obRes.json();
-      if (obData.bids && obData.bids.length > 0) {
-        nonkycBid = parseFloat(obData.bids[0][0]) || nonkycBid;
-        const topBidsUsd = obData.bids.reduce((sum: number, b: any) => sum + parseFloat(b[0]) * parseFloat(b[1]), 0);
-        if (topBidsUsd > 0) nonkycDepthBid = Math.max(35000, topBidsUsd * 18);
-      }
-      if (obData.asks && obData.asks.length > 0) {
-        nonkycAsk = parseFloat(obData.asks[0][0]) || nonkycAsk;
-        const topAsksUsd = obData.asks.reduce((sum: number, a: any) => sum + parseFloat(a[0]) * parseFloat(a[1]), 0);
-        if (topAsksUsd > 0) nonkycDepthAsk = Math.max(35000, topAsksUsd * 18);
-      }
-    }
-  } catch {}
-
-  // Anchor price from live exchange data
-  const anchorPrice =
-    binanceLast ||
-    krakenLast ||
-    coinbaseLast ||
-    nonkycLast ||
-    cachedTickers.find((t) => t.symbol === def.symbol)?.price ||
-    100;
-
-  // Use real values or tight book spreads anchored on live book prices
-  const bBid = binanceBid || anchorPrice * 0.99995;
-  const bAsk = binanceAsk || anchorPrice * 1.00005;
-  const bLast = binanceLast || anchorPrice;
-
-  const kBid = krakenBid || anchorPrice * 0.99985;
-  const kAsk = krakenAsk || anchorPrice * 1.00015;
-  const kLast = krakenLast || anchorPrice;
-
-  const cbBid = coinbaseBid || anchorPrice * 0.9998;
-  const cbAsk = coinbaseAsk || anchorPrice * 1.0001;
-  const cbLast = coinbaseLast || anchorPrice;
-
-  const nkBid = nonkycBid || anchorPrice * 0.9997;
-  const nkAsk = nonkycAsk || anchorPrice * 1.0003;
-  const nkLast = nonkycLast || anchorPrice;
-
-  // Bybit live spot quote estimation based on live order books
-  const bybitBid = anchorPrice * 0.9999;
-  const bybitAsk = anchorPrice * 1.0001;
-
-  return [
-    {
-      exchangeId: 'BINANCE',
-      exchangeName: 'Binance (Live Order Book)',
+  const build = (
+    exchangeId: ExchangeQuoteResult['exchangeId'],
+    exchangeName: string,
+    bid: number,
+    ask: number,
+    last: number,
+    volume24hUsd: number,
+    bidQty: number,
+    askQty: number,
+    latencyMs: number
+  ): ExchangeQuoteResult | null => {
+    if (!(bid > 0) || !(ask > 0) || ask < bid) return null;
+    const px = last > 0 ? last : (bid + ask) / 2;
+    const fee = TAKER[exchangeId];
+    return {
+      exchangeId,
+      exchangeName,
       symbol,
-      bidPrice: bBid,
-      askPrice: bAsk,
-      lastPrice: bLast,
-      volume24h: 3820000000,
-      spreadUsd: Number((bAsk - bBid).toFixed(def.decimals)),
-      spreadPercent: Number((((bAsk - bBid) / (bLast || 1)) * 100).toFixed(4)),
-      effectiveBuyPrice: bAsk * (1 + 0.00075),
-      effectiveSellPrice: bBid * (1 - 0.00075),
-      depthBidUsd: Math.round(binanceDepthBid),
-      depthAskUsd: Math.round(binanceDepthAsk),
-      latencyMs: Math.max(12, binanceLatency),
-      timestamp: now,
-      isRealData: Boolean(binanceLast > 0),
-    },
-    {
-      exchangeId: 'COINBASE',
-      exchangeName: 'Coinbase Pro / Advanced (Live Order Book)',
-      symbol,
-      bidPrice: cbBid,
-      askPrice: cbAsk,
-      lastPrice: cbLast,
-      volume24h: 1840000000,
-      spreadUsd: Number((cbAsk - cbBid).toFixed(def.decimals)),
-      spreadPercent: Number((((cbAsk - cbBid) / (cbLast || 1)) * 100).toFixed(4)),
-      effectiveBuyPrice: cbAsk * (1 + 0.004),
-      effectiveSellPrice: cbBid * (1 - 0.004),
-      depthBidUsd: Math.round(coinbaseDepthBid),
-      depthAskUsd: Math.round(coinbaseDepthAsk),
-      latencyMs: Math.max(18, coinbaseLatency),
-      timestamp: now,
-      isRealData: Boolean(coinbaseLast > 0),
-    },
-    {
-      exchangeId: 'KRAKEN',
-      exchangeName: 'Kraken Financial (Live Order Book)',
-      symbol,
-      bidPrice: kBid,
-      askPrice: kAsk,
-      lastPrice: kLast,
-      volume24h: 920000000,
-      spreadUsd: Number((kAsk - kBid).toFixed(def.decimals)),
-      spreadPercent: Number((((kAsk - kBid) / (kLast || 1)) * 100).toFixed(4)),
-      effectiveBuyPrice: kAsk * (1 + 0.0026),
-      effectiveSellPrice: kBid * (1 - 0.0026),
-      depthBidUsd: Math.round(krakenDepthBid),
-      depthAskUsd: Math.round(krakenDepthAsk),
-      latencyMs: Math.max(22, krakenLatency),
-      timestamp: now,
-      isRealData: Boolean(krakenLast > 0),
-    },
-    {
-      exchangeId: 'NONKYC',
-      exchangeName: 'NonKYC (Zero-KYC Live Order Book)',
-      symbol,
-      bidPrice: nkBid,
-      askPrice: nkAsk,
-      lastPrice: nkLast,
-      volume24h: Math.round(nonkycVolume24h),
-      spreadUsd: Number((nkAsk - nkBid).toFixed(def.decimals)),
-      spreadPercent: Number((((nkAsk - nkBid) / (nkLast || 1)) * 100).toFixed(4)),
-      effectiveBuyPrice: nkAsk * (1 + 0.002),
-      effectiveSellPrice: nkBid * (1 - 0.002),
-      depthBidUsd: Math.round(nonkycDepthBid),
-      depthAskUsd: Math.round(nonkycDepthAsk),
-      latencyMs: Math.max(25, nonkycLatency),
-      timestamp: now,
-      isRealData: Boolean(nonkycLast > 0),
-    },
-    {
-      exchangeId: 'BYBIT',
-      exchangeName: 'Bybit Spot (Live)',
-      symbol,
-      bidPrice: bybitBid,
-      askPrice: bybitAsk,
-      lastPrice: anchorPrice,
-      volume24h: 620000000,
-      spreadUsd: Number((bybitAsk - bybitBid).toFixed(def.decimals)),
-      spreadPercent: Number((((bybitAsk - bybitBid) / (anchorPrice || 1)) * 100).toFixed(4)),
-      effectiveBuyPrice: bybitAsk * (1 + 0.00055),
-      effectiveSellPrice: bybitBid * (1 - 0.00055),
-      depthBidUsd: 110000,
-      depthAskUsd: 105000,
-      latencyMs: 26,
+      bidPrice: bid,
+      askPrice: ask,
+      lastPrice: px,
+      volume24h: Math.round(volume24hUsd),
+      spreadUsd: Number((ask - bid).toFixed(def.decimals)),
+      spreadPercent: Number((((ask - bid) / px) * 100).toFixed(4)),
+      effectiveBuyPrice: ask * (1 + fee),
+      effectiveSellPrice: bid * (1 - fee),
+      // Top-of-book notional only (what the quote endpoints actually return)
+      depthBidUsd: Math.round(bid * bidQty),
+      depthAskUsd: Math.round(ask * askQty),
+      latencyMs,
       timestamp: now,
       isRealData: true,
-    },
-  ];
+    };
+  };
+
+  const timed = async <T>(fn: () => Promise<T>): Promise<{ v: T | null; ms: number }> => {
+    const t0 = Date.now();
+    try {
+      return { v: await fn(), ms: Date.now() - t0 };
+    } catch {
+      return { v: null, ms: Date.now() - t0 };
+    }
+  };
+  const getJson = async (url: string, headers: Record<string, string> = {}) => {
+    const r = await fetchWithTimeout(url, { headers }, 3000);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+
+  const [bin, kra, cb, bb, nk] = await Promise.all([
+    timed(async () => {
+      const [book, t24] = await Promise.all([
+        getJson(`https://api.binance.us/api/v3/ticker/bookTicker?symbol=${def.binanceSymbol}`),
+        getJson(`https://api.binance.us/api/v3/ticker/24hr?symbol=${def.binanceSymbol}`).catch(() => null),
+      ]);
+      return build(
+        'BINANCE',
+        'Binance.US',
+        num(book.bidPrice),
+        num(book.askPrice),
+        num(t24?.lastPrice),
+        num(t24?.quoteVolume),
+        num(book.bidQty),
+        num(book.askQty),
+        0
+      );
+    }),
+    timed(async () => {
+      const d = await getJson(`https://api.kraken.com/0/public/Ticker?pair=${def.krakenPair}`);
+      const key =
+        Object.keys(d.result || {}).find((k) => k === def.krakenKey) || Object.keys(d.result || {})[0];
+      const row = key && d.result[key];
+      if (!row) return null;
+      const last = num(row.c?.[0]);
+      return build('KRAKEN', 'Kraken', num(row.b?.[0]), num(row.a?.[0]), last, num(row.v?.[1]) * last, num(row.b?.[2]), num(row.a?.[2]), 0);
+    }),
+    timed(async () => {
+      const d = await getJson(`https://api.exchange.coinbase.com/products/${def.coinbasePair}/ticker`, {
+        'User-Agent': 'CryptoAgent/1.0',
+      });
+      const last = num(d.price);
+      return build('COINBASE', 'Coinbase Exchange', num(d.bid), num(d.ask), last, num(d.volume) * last, num(d.size), num(d.size), 0);
+    }),
+    timed(async () => {
+      const d = await getJson(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${def.binanceSymbol}`);
+      const row = d?.result?.list?.[0];
+      if (!row) return null;
+      return build('BYBIT', 'Bybit Spot', num(row.bid1Price), num(row.ask1Price), num(row.lastPrice), num(row.turnover24h), num(row.bid1Size), num(row.ask1Size), 0);
+    }),
+    timed(async () => {
+      const h = { 'User-Agent': 'Mozilla/5.0' };
+      const [t, ob] = await Promise.all([
+        getJson(`https://api.nonkyc.io/api/v2/ticker/${def.nonkycPair}`, h),
+        getJson(`https://api.nonkyc.io/api/v2/orderbook?ticker_id=${def.nonkycPair}&depth=1`, h).catch(() => null),
+      ]);
+      const bid = num(ob?.bids?.[0]?.[0]) || num(t?.bid);
+      const ask = num(ob?.asks?.[0]?.[0]) || num(t?.ask);
+      return build('NONKYC', 'NonKYC', bid, ask, num(t?.last_price), num(t?.usd_volume_est), num(ob?.bids?.[0]?.[1]), num(ob?.asks?.[0]?.[1]), 0);
+    }),
+  ]);
+
+  const out: ExchangeQuoteResult[] = [];
+  for (const r of [bin, kra, cb, bb, nk]) {
+    if (r.v) out.push({ ...r.v, latencyMs: r.ms });
+  }
+  return out;
 }

@@ -135,12 +135,12 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
   {
     id: 'agent-whale',
     name: 'Whale Accumulation Sentinel',
-    role: 'Monitors top 500 profitable Ethereum wallets and institutional desks for volume surges',
+    role: 'Watches a short list of labelled wallets for large transfers',
     status: 'ACTIVE',
-    currentFocus: 'Tracking Wintermute & Justin Sun ERC20 accumulation patterns',
-    lastInsight: 'Observed significant accumulation of PEPE & ETH across Uniswap V3 liquidity contracts',
-    confidenceScore: 94,
-    signalsFoundCount: 18,
+    currentFocus: 'Waiting for first sync',
+    lastInsight: 'No data yet',
+    confidenceScore: 0,
+    signalsFoundCount: 0,
     specialty: 'Whale Flow & Wallet Fingerprinting',
   },
   {
@@ -149,9 +149,9 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
     role: 'Scans price dislocation between Uniswap pools and NonKYC/Kraken/Binance order books',
     status: 'ACTIVE',
     currentFocus: 'Cross-referencing Uniswap V3 WETH/USDT pool with NonKYC zero-KYC spot book',
-    lastInsight: 'Detected +0.48% spatial spread on PEPE/USDT between Uniswap V3 and NonKYC',
-    confidenceScore: 91,
-    signalsFoundCount: 24,
+    lastInsight: 'No data yet',
+    confidenceScore: 0,
+    signalsFoundCount: 0,
     specialty: 'Atomic Arbitrage & Spatial Spread Extraction',
   },
   {
@@ -160,9 +160,9 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
     role: 'Analyzes smart contract approvals, liquidity lock events, and early volume velocity',
     status: 'ACTIVE',
     currentFocus: 'Auditing high-frequency ERC20 transfers in current block range',
-    lastInsight: 'Identified steady retail and smart-money inflow into LINK & KAS pairs',
-    confidenceScore: 88,
-    signalsFoundCount: 12,
+    lastInsight: 'No data yet',
+    confidenceScore: 0,
+    signalsFoundCount: 0,
     specialty: 'Smart Contract Auditing & Liquidity Surge',
   },
   {
@@ -171,9 +171,9 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
     role: 'Predicts block base fees and builder priority fees to guarantee front-run-free entry',
     status: 'ACTIVE',
     currentFocus: 'Evaluating BeaverBuild & Titan block builder bids for zero-slippage execution',
-    lastInsight: 'Base fee is under 0.10 Gwei - prime low-slippage window for automated execution',
-    confidenceScore: 96,
-    signalsFoundCount: 31,
+    lastInsight: 'No data yet',
+    confidenceScore: 0,
+    signalsFoundCount: 0,
     specialty: 'EIP-1559 Dynamics & Private Mempool Routing',
   },
   {
@@ -182,9 +182,9 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
     role: 'Aggregates signals from all agents, verifies risk-reward, and triggers automated trades',
     status: 'ACTIVE',
     currentFocus: 'Generating high-confidence cross-market trade signals for live execution',
-    lastInsight: 'Auto-router ready to execute when net profit exceeds +0.25% threshold',
-    confidenceScore: 95,
-    signalsFoundCount: 15,
+    lastInsight: 'No data yet',
+    confidenceScore: 0,
+    signalsFoundCount: 0,
     specialty: 'Cross-Platform Automated Profit Maximization',
   },
 ];
@@ -192,14 +192,14 @@ const INITIAL_AGENTS: EtherscanAgentState[] = [
 // In-memory cache for live on-chain data
 class EtherscanIntelligenceService {
   private blockSnapshot: OnChainBlockSnapshot = {
-    blockNumber: 26060000,
-    baseFeeGwei: 0.08,
-    priorityFeeGwei: 0.02,
-    builderName: 'BeaverBuild (MEV)',
-    txCount: 180,
-    ethPriceUsd: 2675,
-    lastUpdated: Date.now(),
-    syncSource: 'Ethereum Mainnet JSON-RPC',
+    blockNumber: 0,
+    baseFeeGwei: 0,
+    priorityFeeGwei: 0,
+    builderName: 'unknown',
+    txCount: 0,
+    ethPriceUsd: 0,
+    lastUpdated: 0,
+    syncSource: 'Not yet synced',
   };
 
   private liveTransactions: LiveOnChainTx[] = [];
@@ -248,6 +248,25 @@ class EtherscanIntelligenceService {
     return null;
   }
 
+  private ethPriceCache = { usd: 0, at: 0 };
+  private async getEthPriceUsd(): Promise<number> {
+    const now = Date.now();
+    if (this.ethPriceCache.usd > 0 && now - this.ethPriceCache.at < 15000) return this.ethPriceCache.usd;
+    try {
+      const r = await fetch('https://api.exchange.coinbase.com/products/ETH-USD/ticker', {
+        headers: { 'User-Agent': 'CryptoAgent/1.0' },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (r.ok) {
+        const px = parseFloat((await r.json()).price);
+        if (px > 0) this.ethPriceCache = { usd: px, at: now };
+      }
+    } catch {
+      /* keep previous value, if any */
+    }
+    return this.ethPriceCache.usd;
+  }
+
   // Periodic poll of live Ethereum Mainnet
   private startLivePolling(): void {
     if (this.isPolling) return;
@@ -264,16 +283,17 @@ class EtherscanIntelligenceService {
 
   public async syncLiveBlockAndTxs(): Promise<void> {
     try {
-      const [blockRaw, gasPriceHex] = await Promise.all([
+      const [blockRaw, gasPriceHex, ethPriceUsd] = await Promise.all([
         this.callRpc('eth_getBlockByNumber', ['latest', true]),
         this.callRpc('eth_gasPrice', []),
+        this.getEthPriceUsd(),
       ]);
 
       if (!blockRaw) return;
 
       const blockNumber = parseInt(blockRaw.number, 16);
-      const gasPriceGwei = gasPriceHex ? parseInt(gasPriceHex, 16) / 1e9 : 0.08;
-      const baseFeeGwei = blockRaw.baseFeePerGas ? parseInt(blockRaw.baseFeePerGas, 16) / 1e9 : 0.05;
+      const gasPriceGwei = gasPriceHex ? parseInt(gasPriceHex, 16) / 1e9 : 0;
+      const baseFeeGwei = blockRaw.baseFeePerGas ? parseInt(blockRaw.baseFeePerGas, 16) / 1e9 : 0;
       const miner = (blockRaw.miner || '').toLowerCase();
       const builderName = KNOWN_BUILDERS[miner] || `Block Builder (${miner.slice(0, 8)}...)`;
       const txs = Array.isArray(blockRaw.transactions) ? blockRaw.transactions : [];
@@ -281,10 +301,10 @@ class EtherscanIntelligenceService {
       this.blockSnapshot = {
         blockNumber,
         baseFeeGwei: Number(baseFeeGwei.toFixed(4)),
-        priorityFeeGwei: Number(Math.max(0.01, gasPriceGwei - baseFeeGwei).toFixed(4)),
+        priorityFeeGwei: Number(Math.max(0, gasPriceGwei - baseFeeGwei).toFixed(4)),
         builderName,
         txCount: txs.length,
-        ethPriceUsd: 2675,
+        ethPriceUsd,
         lastUpdated: Date.now(),
         syncSource: 'Ethereum Mainnet Live Feed',
       };
@@ -302,11 +322,11 @@ class EtherscanIntelligenceService {
         const toInfo = NOTABLE_WALLETS[toAddr];
 
         const isNotableWhale = Boolean(fromInfo || toInfo);
-        const isHighValue = valEth >= 2.0; // >= 2 ETH (~$5.3k)
+        const isHighValue = valEth >= 2.0; // >= 2 ETH
         const isDexInteraction = toInfo?.category === 'DEX' || tx.input?.length > 10;
 
         if (isNotableWhale || isHighValue || (isDexInteraction && valEth > 0.5)) {
-          const valUsd = valEth * 2675;
+          const valUsd = valEth * ethPriceUsd;
           const gasPrice = parseInt(tx.gasPrice || '0x0', 16) / 1e9;
           const txHash = tx.hash;
 
@@ -369,96 +389,8 @@ class EtherscanIntelligenceService {
     const now = Date.now();
     const blockNum = this.blockSnapshot.blockNumber;
 
-    // Detect high-profit patterns based on real Ethereum activity
-    const generatedPatterns: TradePatternSignal[] = [
-      {
-        id: `pattern-${blockNum}-pepe-arb`,
-        title: 'Uniswap V3 vs NonKYC Zero-KYC Spatial Arbitrage',
-        type: 'DEX_CEX_ARBITRAGE',
-        targetAsset: 'PEPE/USDT',
-        side: 'BUY',
-        expectedProfitPercent: 1.42,
-        winProbability: 94,
-        recommendedExchange: 'NONKYC',
-        reason: 'Large 48 ETH buy on Uniswap V3 Universal Router moved on-chain price +1.8%; NonKYC order book is lagging by 42 seconds with deep ask liquidity.',
-        evidenceTxHash: this.liveTransactions[0]?.hash || '0x22126309aee3cc390fd17ab3bcd97c483aca6bf588ee69c724891c03fed46a16',
-        etherscanUrl: this.liveTransactions[0]?.etherscanUrl || `https://etherscan.io/block/${blockNum}`,
-        netExpectedProfitUsd: 142.5,
-        status: 'DETECTED',
-        timestamp: now,
-        agentAuthor: 'MEV & Cross-DEX Arbitrage Hunter',
-      },
-      {
-        id: `pattern-${blockNum}-whale-accum`,
-        title: 'Institutional Smart Money Inflow: ETH/USDT Breakout',
-        type: 'WHALE_ACCUMULATION',
-        targetAsset: 'ETH/USDT',
-        side: 'BUY',
-        expectedProfitPercent: 2.15,
-        winProbability: 92,
-        recommendedExchange: 'BINANCE',
-        reason: 'Wintermute Trading & top market maker addresses withdrew 3,400+ ETH from CEX hot wallets into private custody contracts over the last 15 blocks.',
-        evidenceTxHash: this.liveTransactions[1]?.hash || '0x4feb8dd18f442ff67b521b5a5bc4c3824e3288ab',
-        etherscanUrl: this.liveTransactions[1]?.etherscanUrl || `https://etherscan.io/block/${blockNum}`,
-        netExpectedProfitUsd: 215.0,
-        status: 'DETECTED',
-        timestamp: now - 12000,
-        agentAuthor: 'Whale Accumulation Sentinel',
-      },
-      {
-        id: `pattern-${blockNum}-link-mev`,
-        title: 'Chainlink Cross-Pool Triangular Inefficiency',
-        type: 'MEV_OPPORTUNITY',
-        targetAsset: 'LINK/USDT',
-        side: 'BUY',
-        expectedProfitPercent: 0.88,
-        winProbability: 96,
-        recommendedExchange: 'KRAKEN',
-        reason: 'BeaverBuild block bundle detected 12.5 ETH sandwich transaction, creating a momentary +0.95% discount on Kraken spot book vs DEX TWAP.',
-        evidenceTxHash: this.liveTransactions[2]?.hash || '0x7a250d5630b4cf539739df2c5dacb4c659f2488d',
-        etherscanUrl: this.liveTransactions[2]?.etherscanUrl || `https://etherscan.io/block/${blockNum}`,
-        netExpectedProfitUsd: 88.0,
-        status: 'DETECTED',
-        timestamp: now - 25000,
-        agentAuthor: 'MEV & Cross-DEX Arbitrage Hunter',
-      },
-      {
-        id: `pattern-${blockNum}-gas-timing`,
-        title: 'Ultra-Low Base Fee Tactical Sniping Window',
-        type: 'GAS_TIMING',
-        targetAsset: 'SOL/USDT',
-        side: 'BUY',
-        expectedProfitPercent: 1.15,
-        winProbability: 90,
-        recommendedExchange: 'COINBASE',
-        reason: `Current Ethereum base fee (${this.blockSnapshot.baseFeeGwei} Gwei) is in lowest 5th percentile of 24h range; zero mempool congestion allows instant execution with <0.02% slippage.`,
-        evidenceTxHash: this.liveTransactions[0]?.hash || '0x396343362be2a4da1ce0c1c210945346fb82aa49',
-        etherscanUrl: `https://etherscan.io/block/${blockNum}`,
-        netExpectedProfitUsd: 115.0,
-        status: 'DETECTED',
-        timestamp: now - 35000,
-        agentAuthor: 'Tactical Gas & Block-Builder Optimizer',
-      },
-      {
-        id: `pattern-${blockNum}-kas-surge`,
-        title: 'NonKYC Zero-KYC Spot Liquidity Arbitrage',
-        type: 'VELOCITY_SURGE',
-        targetAsset: 'KAS/USDT',
-        side: 'BUY',
-        expectedProfitPercent: 3.25,
-        winProbability: 89,
-        recommendedExchange: 'NONKYC',
-        reason: 'Cross-chain bridging logs show 180,000 USDT bridged into NonKYC peer-to-peer liquidity book. Buy pressure on NonKYC yields +3.25% premium vs OTC desk.',
-        evidenceTxHash: this.liveTransactions[3]?.hash || '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45',
-        etherscanUrl: `https://etherscan.io/address/0xdbf5e9c5206d0ba70a90108c905a0171b69080cf`,
-        netExpectedProfitUsd: 325.0,
-        status: 'DETECTED',
-        timestamp: now - 48000,
-        agentAuthor: 'Token Velocity & Liquidity Auditor',
-      },
-    ];
-
-    this.tradePatterns = generatedPatterns;
+    // No trade signals are fabricated. A real signal engine has not been built, so this list stays empty.
+    this.tradePatterns = [];
 
     // Update agents' live activity status
     this.agents = this.agents.map((agent) => {
@@ -470,38 +402,28 @@ class EtherscanIntelligenceService {
         insight = `Tracking ${this.liveTransactions.filter((t) => t.patternType === 'WHALE_TRANSFER' || t.patternType === 'SMART_ACCUMULATION').length} high-value whale transactions in latest 10 blocks.`;
       } else if (agent.id === 'agent-mev') {
         focus = `Monitoring ${this.blockSnapshot.builderName} bundles & Uniswap V3 slippage`;
-        insight = `Spatial arb opportunity on ${this.tradePatterns[0]?.targetAsset} yielding +${this.tradePatterns[0]?.expectedProfitPercent}% net profit.`;
+        insight = 'No arbitrage detector is running in this process; see the flash-arb searcher.';
       } else if (agent.id === 'agent-gas') {
         focus = `Base fee: ${this.blockSnapshot.baseFeeGwei} Gwei | Priority: ${this.blockSnapshot.priorityFeeGwei} Gwei`;
-        insight = `Gas cost per swap is ~$0.15. Optimal window for automated execution active.`;
+        insight = `Latest base fee ${this.blockSnapshot.baseFeeGwei} Gwei.`;
       } else if (agent.id === 'agent-orchestrator') {
-        focus = `Synthesizing ${this.tradePatterns.length} profitable on-chain trade patterns`;
-        insight = `Highest profit opportunity: ${this.tradePatterns[0]?.title} (+${this.tradePatterns[0]?.expectedProfitPercent}% net).`;
+        focus = `${this.tradePatterns.length} verified trade signals`;
+        insight = 'Signal synthesis is not implemented; nothing is executed automatically.';
       }
 
       return {
         ...agent,
         currentFocus: focus,
         lastInsight: insight,
-        confidenceScore: Math.min(99, Math.max(85, Math.round(agent.confidenceScore + (Math.random() * 2 - 1)))),
-        signalsFoundCount: agent.signalsFoundCount + (Math.random() > 0.8 ? 1 : 0),
+        confidenceScore: 0,
+        signalsFoundCount: this.tradePatterns.length,
       };
     });
 
-    // If auto execution is active and threshold is met, auto-execute the highest signal
-    if (this.autoExecutionEnabled) {
-      const topSignal = this.tradePatterns.find(
-        (p) => p.expectedProfitPercent >= this.minProfitThresholdPercent && p.status === 'DETECTED'
-      );
-      if (topSignal) {
-        topSignal.status = 'EXECUTING';
-        this.executePatternTrade(topSignal.id);
-      }
-    }
   }
 
-  // Execute an on-chain detected trade pattern against live exchange gateways
-  public async executePatternTrade(signalId: string): Promise<{
+  // Pattern auto-execution was removed: signals are not generated, so nothing may trade on them.
+  public async executePatternTrade(_signalId: string): Promise<{
     success: boolean;
     receipt?: string;
     orderId?: string;
@@ -510,46 +432,13 @@ class EtherscanIntelligenceService {
     executionNote: string;
     error?: string;
   }> {
-    const signal = this.tradePatterns.find((p) => p.id === signalId);
-    if (!signal) {
-      return { success: false, exchange: 'NONKYC', targetAsset: 'ETH/USDT', executionNote: 'Signal not found', error: 'Signal not found' };
-    }
-
-    signal.status = 'EXECUTING';
-    const receipt = '0x' + crypto.randomBytes(16).toString('hex');
-    const orderId = `eth-alpha-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-
-    try {
-      // In live environment, this communicates directly with the exchange order execution router
-      signal.status = 'EXECUTED';
-      const logEntry = {
-        signalId: signal.id,
-        targetAsset: signal.targetAsset,
-        exchange: signal.recommendedExchange,
-        profitEst: signal.expectedProfitPercent,
-        receipt,
-        timestamp: Date.now(),
-      };
-      this.executedSignalsLog.unshift(logEntry);
-
-      return {
-        success: true,
-        receipt,
-        orderId,
-        exchange: signal.recommendedExchange,
-        targetAsset: signal.targetAsset,
-        executionNote: `Automated on-chain trade executed: Bought ${signal.targetAsset} on ${signal.recommendedExchange} based on ${signal.title}. Real cryptographic proof generated.`,
-      };
-    } catch (err: any) {
-      signal.status = 'DETECTED';
-      return {
-        success: false,
-        exchange: signal.recommendedExchange,
-        targetAsset: signal.targetAsset,
-        executionNote: 'Failed to dispatch order',
-        error: err.message,
-      };
-    }
+    return {
+      success: false,
+      exchange: '',
+      targetAsset: '',
+      executionNote: 'Not executed',
+      error: 'Automated execution of on-chain patterns is disabled. Place orders explicitly via /api/exchange/execute-order.',
+    };
   }
 
   // Deep AI Synthesis using Gemini 3.8 Flash
@@ -607,46 +496,29 @@ INSTRUCTIONS:
 4. Keep the tone professional, institutional, and mathematically grounded.
 `;
 
-    try {
-      if (process.env.GEMINI_API_KEY) {
-        const ai = new GoogleGenAI({});
-        const response = await callWithTimeout(() =>
-          ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: promptText,
-          }),
-          3500
-        );
-
-        const text = response.text || '';
-        return {
-          summary: text,
-          actionableStrategies: [
-            `Capitalize on ${this.tradePatterns[0]?.targetAsset} spatial dislocation on ${this.tradePatterns[0]?.recommendedExchange} (+${this.tradePatterns[0]?.expectedProfitPercent}%)`,
-            `Front-run CEX price discovery following 3,400+ ETH institutional cold storage withdrawals`,
-            `Leverage ultra-low base fee (${block.baseFeeGwei} Gwei) to submit automated limit orders on NonKYC with zero slippage`,
-          ],
-          riskScore: 28,
-          recommendedAsset: this.tradePatterns[0]?.targetAsset || 'PEPE/USDT',
-          expectedRoi: `+${this.tradePatterns[0]?.expectedProfitPercent || 1.45}% to +3.50% per trade cycle`,
-          timestamp: Date.now(),
-        };
-      }
-    } catch (err: any) {
-      console.error('Gemini on-chain analysis error:', err.message);
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY is not configured on the server.');
     }
-
-    // High quality deterministic institutional fallback
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const response = await callWithTimeout(
+      () =>
+        ai.models.generateContent({
+          model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+          contents:
+            promptText +
+            `\nRespond ONLY with JSON: {"summary": string, "actionableStrategies": string[], "riskScore": number (1-100), "recommendedAsset": string, "expectedRoi": string}. ` +
+            `Base every claim on the data above; state uncertainty explicitly and do not invent figures.`,
+          config: { responseMimeType: 'application/json', temperature: 0.2 },
+        }),
+      30000
+    );
+    const parsed = JSON.parse((response.text || '{}').trim());
     return {
-      summary: `On-chain analysis of Ethereum Block #${block.blockNumber} confirms strong institutional accumulation across DEX liquidity routers. The lowest 5th percentile gas base fee (${block.baseFeeGwei} Gwei) and BeaverBuild builder dominance create an ideal window for high-frequency spatial arbitrage against NonKYC and Kraken spot books. Net expected ROI exceeds +1.42% with a 94% win probability.`,
-      actionableStrategies: [
-        'Execute automated smart-route buy on NonKYC for PEPE/USDT to exploit on-chain DEX lag',
-        'Deploy capital into ETH/USDT momentum breakout following 3,400+ ETH cold wallet withdrawals',
-        'Set automated limit bid on Kraken for LINK/USDT at 0.95% discount under DEX TWAP',
-      ],
-      riskScore: 25,
-      recommendedAsset: 'PEPE/USDT',
-      expectedRoi: '+1.42% to +3.25%',
+      summary: String(parsed.summary || ''),
+      actionableStrategies: Array.isArray(parsed.actionableStrategies) ? parsed.actionableStrategies.map(String) : [],
+      riskScore: Number(parsed.riskScore) || 0,
+      recommendedAsset: String(parsed.recommendedAsset || ''),
+      expectedRoi: String(parsed.expectedRoi || ''),
       timestamp: Date.now(),
     };
   }
@@ -667,7 +539,8 @@ INSTRUCTIONS:
   }
 
   public setAutoExecution(enabled: boolean, minThresholdPercent = 0.20) {
-    this.autoExecutionEnabled = enabled;
+    // Auto-execution is permanently disabled (see executePatternTrade).
+    this.autoExecutionEnabled = false;
     this.minProfitThresholdPercent = minThresholdPercent;
     return { autoExecutionEnabled: this.autoExecutionEnabled, minProfitThresholdPercent: this.minProfitThresholdPercent };
   }

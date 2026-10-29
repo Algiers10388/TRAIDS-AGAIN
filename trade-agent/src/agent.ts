@@ -56,7 +56,7 @@ export class CryptoTradingAgent {
     if (this.isRunning) return;
     this.isRunning = true;
     console.log(`[AGENT START] Initializing Autonomous Crypto Trading Agent on ${this.config.symbols.join(', ')}...`);
-    console.log(`[STRATEGY] Mode: ${this.config.strategy} | Mode: ${this.config.isDryRun ? 'DRY-RUN PAPER TRADING' : 'LIVE CAPITAL'}`);
+    console.log(`[STRATEGY] Mode: ${this.config.strategy} | Mode: ${this.config.isDryRun ? 'DRY-RUN SIGNALS ONLY' : 'LIVE CAPITAL'}`);
 
     const runLoop = async () => {
       if (!this.isRunning) return;

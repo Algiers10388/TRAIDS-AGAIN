@@ -49,6 +49,7 @@ fi
 echo ""
 echo "=== [2/4] Compiling FlashArb Smart Contracts ==="
 cd "$CONTRACTS_DIR"
+[ -d lib/forge-std ] || forge install --no-git foundry-rs/forge-std
 
 # Clean any stale build artifacts or failed compiler caches
 forge clean
@@ -63,9 +64,9 @@ fi
 echo ""
 echo "=== [3/4] Running Arbitrum Fork Tests ==="
 if [ -n "$SOLC_BIN" ]; then
-    forge test --use "$SOLC_BIN" --fork-url https://arb1.arbitrum.io/rpc --fork-block-number 225000000 -vvv
+    FORK_URL="${FORK_URL:-https://arb1.arbitrum.io/rpc}" forge test --use "$SOLC_BIN" -vvv
 else
-    forge test --fork-url https://arb1.arbitrum.io/rpc --fork-block-number 225000000 -vvv
+    FORK_URL="${FORK_URL:-https://arb1.arbitrum.io/rpc}" forge test -vvv
 fi
 
 echo ""

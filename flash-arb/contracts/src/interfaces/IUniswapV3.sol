@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @notice Original Uniswap V3 SwapRouter (has `deadline`). Used on Arbitrum (0xE592...1564).
 interface ISwapRouter {
     struct ExactInputSingleParams {
         address tokenIn;
@@ -24,6 +25,21 @@ interface ISwapRouter {
     }
 
     function exactInput(ExactInputParams calldata params) external payable returns (uint256 amountOut);
+}
+
+/// @notice Uniswap V3 SwapRouter02 (NO `deadline` in the struct). Used on Base and Optimism.
+interface ISwapRouter02 {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
 }
 
 interface IUniswapV3Pool {

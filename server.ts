@@ -9,6 +9,7 @@ import { setupExchangeRoutes } from "./server/exchangeRoutes";
 import { aiRouter } from "./server/aiRoutes";
 import { walletRouter } from "./server/walletRoutes";
 import { flashArbRouter } from "./server/flashArbRoutes";
+import { requireAuth } from "./server/auth";
 
 dotenv.config();
 
@@ -43,6 +44,14 @@ async function startServer() {
     next(err);
   });
 
+  // Public health check (the only unauthenticated API route)
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: Date.now() });
+  });
+
+  // Everything else under /api requires a verified Firebase login that is on the owner allowlist
+  app.use("/api", requireAuth);
+
   // Live Currency Account & Bank/Debit Card Gateway
   setupFiatRoutes(app);
 
@@ -58,91 +67,47 @@ async function startServer() {
   // Flash Loan Arbitrage Gas Monitor & Searcher Signer Gateway
   app.use('/api/flash-arb', flashArbRouter);
 
-  // Health check
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: Date.now() });
-  });
-
-  // Multi-Exchange Gateways Status & Configuration
-  app.get("/api/exchanges", (_req, res) => {
-    const exchanges = [
-      {
-        id: "BINANCE",
-        name: "Binance Global",
-        shortName: "Binance",
-        tagColor: "#F0B90B",
-        status: "CONNECTED",
-        latencyMs: 22,
-        makerFeePercent: 0.02,
-        takerFeePercent: 0.075,
-        enabled: true,
-        apiEndpoint: "https://api.binance.com/api/v3",
-        tier: "VIP 1 (BNB 25% Disc.)",
-        hasApiKeyConfigured: Boolean(process.env.BINANCE_API_KEY),
-        volumeSharePercent: 54,
-      },
-      {
-        id: "COINBASE",
-        name: "Coinbase Pro / Advanced",
-        shortName: "Coinbase",
-        tagColor: "#0052FF",
-        status: "CONNECTED",
-        latencyMs: 35,
-        makerFeePercent: 0.20,
-        takerFeePercent: 0.40,
-        enabled: true,
-        apiEndpoint: "https://api.exchange.coinbase.com",
-        tier: "Advanced Trader (<$10k)",
-        hasApiKeyConfigured: Boolean(process.env.COINBASE_API_KEY),
-        volumeSharePercent: 26,
-      },
-      {
-        id: "KRAKEN",
-        name: "Kraken Financial",
-        shortName: "Kraken",
-        tagColor: "#5741D9",
-        status: "CONNECTED",
-        latencyMs: 41,
-        makerFeePercent: 0.16,
-        takerFeePercent: 0.26,
-        enabled: true,
-        apiEndpoint: "https://api.kraken.com/0",
-        tier: "Intermediate Pro",
-        hasApiKeyConfigured: Boolean(process.env.KRAKEN_API_KEY),
-        volumeSharePercent: 14,
-      },
-      {
-        id: "BYBIT",
-        name: "Bybit Spot & Derivatives",
-        shortName: "Bybit",
-        tagColor: "#F7A600",
-        status: "CONNECTED",
-        latencyMs: 27,
-        makerFeePercent: 0.02,
-        takerFeePercent: 0.055,
-        enabled: true,
-        apiEndpoint: "https://api.bybit.com/v5",
-        tier: "VIP 0 Tier",
-        hasApiKeyConfigured: true,
-        volumeSharePercent: 6,
-      },
-      {
-        id: "NONKYC",
-        name: "NonKYC Exchange (Zero-KYC Spot)",
-        shortName: "NonKYC",
-        tagColor: "#A855F7",
-        status: "CONNECTED",
-        latencyMs: 32,
-        makerFeePercent: 0.10,
-        takerFeePercent: 0.20,
-        enabled: true,
-        apiEndpoint: "https://api.nonkyc.io/api/v2",
-        tier: "Zero-KYC High Privacy",
-        hasApiKeyConfigured: true,
-        volumeSharePercent: 8,
-      },
+  // Multi-Exchange Gateways Status: real reachability + latency probes, real credential presence
+  app.get("/api/exchanges", async (_req, res) => {
+    const defs = [
+      { id: "BINANCE", name: "Binance Global", shortName: "Binance", tagColor: "#F0B90B", apiEndpoint: "https://api.binance.com/api/v3", probe: "https://api.binance.com/api/v3/ping", keyEnv: "BINANCE_API_KEY", makerFeePercent: 0.1, takerFeePercent: 0.1 },
+      { id: "COINBASE", name: "Coinbase Advanced", shortName: "Coinbase", tagColor: "#0052FF", apiEndpoint: "https://api.exchange.coinbase.com", probe: "https://api.exchange.coinbase.com/time", keyEnv: "COINBASE_API_KEY", makerFeePercent: 0.4, takerFeePercent: 0.6 },
+      { id: "KRAKEN", name: "Kraken", shortName: "Kraken", tagColor: "#5741D9", apiEndpoint: "https://api.kraken.com/0", probe: "https://api.kraken.com/0/public/Time", keyEnv: "KRAKEN_API_KEY", makerFeePercent: 0.25, takerFeePercent: 0.4 },
+      { id: "BYBIT", name: "Bybit", shortName: "Bybit", tagColor: "#F7A600", apiEndpoint: "https://api.bybit.com/v5", probe: "https://api.bybit.com/v5/market/time", keyEnv: "BYBIT_API_KEY", makerFeePercent: 0.1, takerFeePercent: 0.1 },
+      { id: "NONKYC", name: "NonKYC Exchange", shortName: "NonKYC", tagColor: "#A855F7", apiEndpoint: "https://api.nonkyc.io/api/v2", probe: "https://api.nonkyc.io/api/v2/info", keyEnv: "NONKYC_API_KEY", makerFeePercent: 0.2, takerFeePercent: 0.2 },
     ];
-
+    const exchanges = await Promise.all(
+      defs.map(async (d) => {
+        const t0 = Date.now();
+        let status: "CONNECTED" | "DISCONNECTED" = "DISCONNECTED";
+        let latencyMs: number | null = null;
+        try {
+          const r = await fetch(d.probe, { signal: AbortSignal.timeout(5000) });
+          if (r.ok) {
+            status = "CONNECTED";
+            latencyMs = Date.now() - t0;
+          }
+        } catch {
+          /* leave DISCONNECTED */
+        }
+        return {
+          id: d.id,
+          name: d.name,
+          shortName: d.shortName,
+          tagColor: d.tagColor,
+          status,
+          latencyMs,
+          // Published base-tier retail fees; actual account tier is not queried.
+          makerFeePercent: d.makerFeePercent,
+          takerFeePercent: d.takerFeePercent,
+          enabled: status === "CONNECTED",
+          apiEndpoint: d.apiEndpoint,
+          tier: "Base fee schedule (account tier not queried)",
+          hasApiKeyConfigured: Boolean(process.env[d.keyEnv]),
+          volumeSharePercent: null,
+        };
+      })
+    );
     res.json({ success: true, exchanges, timestamp: Date.now() });
   });
 
@@ -211,148 +176,57 @@ async function startServer() {
     }
   });
 
-  // AI Strategy & Market Intelligence Analysis Endpoint
+  // AI Strategy & Market Intelligence Analysis Endpoint (real Gemini call or an honest error)
   app.post("/api/ai-strategy-audit", async (req, res) => {
     try {
-      const {
-        symbol,
-        currentPrice,
-        priceChange24h,
-        rsi,
-        macd,
-        strategyName,
-        parameters,
-        portfolio,
-      } = req.body;
-
+      const { symbol, currentPrice, priceChange24h, rsi, macd, strategyName, parameters, portfolio } = req.body || {};
       const ai = getGenAI();
-
       if (!ai) {
-        // High quality fallback analysis if GEMINI_API_KEY is not configured yet
-        const riskLevel =
-          (parameters?.leverage || 1) > 3 || (parameters?.stopLossPercent || 5) > 10
-            ? "High"
-            : (parameters?.takeProfitPercent || 5) > 15
-            ? "Moderate"
-            : "Balanced";
-
-        return res.json({
-          success: true,
-          source: "rule-engine",
-          analysis: {
-            marketTrendSummary: `${symbol} is showing ${
-              priceChange24h >= 0 ? "bullish upward momentum" : "bearish corrective pressure"
-            } with RSI at ${rsi?.toFixed(1) || "50.0"}. Volatility is currently elevated.`,
-            strategyCritique: `Your "${strategyName || "Momentum"}" strategy has a ${
-              parameters?.leverage > 1 ? parameters.leverage + "x leveraged" : "spot"
-            } stance. Target profit of ${parameters?.takeProfitPercent || 5}% with a stop loss of ${
-              parameters?.stopLossPercent || 3
-            }% provides a risk-reward ratio of ${
-              ((parameters?.takeProfitPercent || 5) / (parameters?.stopLossPercent || 3)).toFixed(2)
-            }:1.`,
-            riskScore: (parameters?.leverage || 1) * 15 + ((parameters?.stopLossPercent || 3) > 5 ? 25 : 10),
-            riskLevel,
-            recommendedAdjustments: [
-              (parameters?.leverage || 1) > 3
-                ? "Reduce leverage below 3x to prevent liquidation during flash wicks."
-                : "Maintain strict trailing stop loss to lock in short-term gains.",
-              "Consider fee drag: high frequency scalp executions incur 0.05%-0.1% exchange taker fees per turn.",
-              "Test strategy across multiple market regimes (consolidation vs trending) before increasing position sizing.",
-            ],
-            shortTermProfitOutlook:
-              "High-return expectations in compressed time horizons correlate with elevated liquidation risk. Focus on positive mathematical expectancy over individual high-risk gambles.",
-          },
-        });
+        return res.status(503).json({ success: false, error: "GEMINI_API_KEY is not configured on the server." });
       }
 
-      const prompt = `You are a world-class institutional quantitative crypto trader and risk auditor.
-Analyze the following live market state and automated bot strategy parameters:
+      const prompt = `You are a quantitative crypto trader and risk auditor.
+Analyze the following market state and automated strategy parameters. Use only the data given; do not invent figures.
 Asset: ${symbol}
 Current Price: $${currentPrice}
 24h Change: ${priceChange24h}%
-Technical RSI (14): ${rsi}
-MACD Signal: ${JSON.stringify(macd || {})}
-Active Strategy: ${strategyName}
+RSI (14): ${rsi}
+MACD: ${JSON.stringify(macd || {})}
+Strategy: ${strategyName}
 Parameters: ${JSON.stringify(parameters, null, 2)}
-Portfolio State: Cash: $${portfolio?.cash || 10000}, Active Positions: ${portfolio?.positionsCount || 0}, Total Trades: ${portfolio?.totalTrades || 0}
+Portfolio: ${JSON.stringify(portfolio || {})}
 
-User Goal: "Execute automated trades based on set parameters to make a significant profit in a short time".
-
-Provide an objective, professional, mathematically sound evaluation in valid JSON with these exact keys:
+Respond with valid JSON with exactly these keys:
 {
-  "marketTrendSummary": "Concise 1-2 sentence description of current trend & technical momentum",
-  "strategyCritique": "Critique of whether these specific parameters (RSI trigger, take-profit, stop-loss, position size, leverage) are mathematically viable or over-exposed",
-  "riskScore": number from 1 to 100 (where 100 is extreme liquidation risk),
+  "marketTrendSummary": string,
+  "strategyCritique": string,
+  "riskScore": number 1-100,
   "riskLevel": "Low" | "Moderate" | "High" | "Extreme",
-  "recommendedAdjustments": ["string", "string", "string"],
-  "shortTermProfitOutlook": "Honest quantitative assessment addressing the user's desire for quick profits, explaining the trade-off between velocity and drawdown survival"
+  "recommendedAdjustments": [string, string, string],
+  "shortTermProfitOutlook": string
 }
-Return ONLY valid JSON without markdown wrapping.`;
+Return ONLY JSON.`;
 
-      let parsedAnalysis: any = null;
-
-      try {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.3,
-          },
-        });
-
-        const responseText = response.text || "{}";
-        const cleanJson = responseText.trim().replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-        parsedAnalysis = JSON.parse(cleanJson);
-      } catch (genErr) {
-        console.warn("Gemini generation transient error or high demand, using resilient quant auditor:", genErr);
-      }
-
-      if (parsedAnalysis && parsedAnalysis.riskScore !== undefined) {
-        return res.json({
-          success: true,
-          source: "gemini-3.8-flash",
-          analysis: parsedAnalysis,
-        });
-      }
-
-      // Robust institutional quant fallback
-      const leverage = parameters?.leverage || 1;
-      const tp = parameters?.takeProfitPercent || 4;
-      const sl = parameters?.stopLossPercent || 2;
-      const riskRatio = (tp / Math.max(sl, 0.1)).toFixed(2);
-      const riskScore = Math.min(100, leverage * 18 + (sl > 4 ? 20 : 10));
-      const riskLevel = riskScore >= 70 ? "High" : riskScore >= 40 ? "Moderate" : "Low";
-
-      return res.json({
-        success: true,
-        source: "quant-engine",
-        analysis: {
-          marketTrendSummary: `${symbol} is trading near $${currentPrice} with 24h change of ${
-            priceChange24h >= 0 ? "+" : ""
-          }${priceChange24h}%. Technical RSI is ${rsi?.toFixed(1) || "50.0"}, signaling active momentum pressure.`,
-          strategyCritique: `Your "${strategyName || "Custom"}" strategy deploys ${leverage}x leverage with a +${tp}% Take Profit and -${sl}% Stop Loss (Reward-to-Risk: ${riskRatio}:1). Single-trade capital exposure is set to ${
-            parameters?.orderSizePercent || 15
-          }%.`,
-          riskScore,
-          riskLevel,
-          recommendedAdjustments: [
-            leverage > 2
-              ? "Cap leverage at 2x: sudden 4% wicks can cause rapid liquidation before stops register."
-              : "Maintain strict trailing stop loss to protect accumulated unrealized gains.",
-            "Account for exchange taker fee drag (0.05%-0.1% per trade) on rapid scalp intervals.",
-            "Verify metrics across market cycles before scaling order allocation above 20%.",
-          ],
-          shortTermProfitOutlook:
-            "Targeting aggressive short-term profits in cryptocurrency mathematically mandates asymmetric risk-taking. Prioritize positive mathematical expectancy (win rate * avg gain > loss rate * avg loss) over extreme leverage.",
-        },
+      const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json", temperature: 0.3 },
       });
+      const text = (response.text || "").trim().replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+      let analysis: any;
+      try {
+        analysis = JSON.parse(text);
+      } catch {
+        return res.status(502).json({ success: false, error: "Gemini returned a non-JSON response" });
+      }
+      if (analysis?.riskScore === undefined) {
+        return res.status(502).json({ success: false, error: "Gemini response was missing required fields" });
+      }
+      return res.json({ success: true, source: model, analysis });
     } catch (err: any) {
       console.error("AI strategy audit error:", err);
-      return res.status(500).json({
-        success: false,
-        error: err.message || "Failed to generate strategy analysis",
-      });
+      return res.status(502).json({ success: false, error: err.message || "Gemini request failed" });
     }
   });
 

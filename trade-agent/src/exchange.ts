@@ -1,6 +1,6 @@
 // ==============================================================================
 // Autonomous Crypto Trading Agent: Multi-Exchange Execution Engine
-// Supports: Binance, OKX, Coinbase, Bybit, Kraken & Dry-Run Paper Trading
+// Supports: Binance, OKX, Coinbase, Bybit, Kraken & Dry-Run (signals only)
 // ==============================================================================
 
 import crypto from 'node:crypto';
@@ -77,19 +77,25 @@ export class ExchangeClient {
     }
 
     try {
-      // 2. Fallback: CoinGecko or generated realistic stochastic random walk from spot price
-      const spotRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${cleanPair}`);
-      if (spotRes.ok) {
-        const data = (await spotRes.json()) as { price: string };
-        const basePrice = parseFloat(data.price);
-        return this.generateSyntheticCandles(basePrice, limit);
+      // 2. Binance.US public klines (api.binance.com is geo-blocked in some regions)
+      const res = await fetch(`https://api.binance.us/api/v3/klines?symbol=${cleanPair}&interval=${interval}&limit=${limit}`);
+      if (res.ok) {
+        const raw = (await res.json()) as any[];
+        return raw.map((k) => ({
+          timestamp: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        }));
       }
     } catch (e) {
-      // Fallback to offline synthetic candles
+      // fall through to the error below
     }
 
-    const defaultPrice = symbol.includes('BTC') ? 68500 : symbol.includes('ETH') ? 2650 : 150;
-    return this.generateSyntheticCandles(defaultPrice, limit);
+    // No synthetic data: if live candles are unavailable, fail loudly.
+    throw new Error(`Live candles unavailable for ${symbol}`);
   }
 
   // Fetch real live ticker price
@@ -104,7 +110,16 @@ export class ExchangeClient {
     } catch (e) {
       // ignore
     }
-    return symbol.includes('BTC') ? 68500 : symbol.includes('ETH') ? 2650 : 150;
+    try {
+      const res = await fetch(`https://api.binance.us/api/v3/ticker/price?symbol=${cleanPair}`);
+      if (res.ok) {
+        const data = (await res.json()) as { price: string };
+        return parseFloat(data.price);
+      }
+    } catch (e) {
+      // fall through
+    }
+    throw new Error(`Live price unavailable for ${symbol}`);
   }
 
   // Execute Real Trade or Paper Trade
@@ -113,24 +128,21 @@ export class ExchangeClient {
     const quantity = (req.amountUsd / currentPrice) * (req.leverage || 1);
     const feeUsd = req.amountUsd * 0.0006; // standard 0.06% taker fee
 
-    // Paper Trading / Dry Run
+    // Dry-run / no credentials: signal only. No fill is fabricated and no position is opened.
     if (this.exchange === 'PAPER_TRADING' || !this.creds.apiKey) {
-      // Apply slight realistic slippage (0.01% - 0.03%)
-      const slippageFactor = req.side === 'BUY' ? 1.0002 : 0.9998;
-      const fillPrice = currentPrice * slippageFactor;
-
       return {
-        success: true,
-        orderId: 'SIM_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-        exchange: 'PAPER_TRADING (SIMULATED)',
+        success: false,
+        orderId: '',
+        exchange: 'NONE',
         symbol: req.symbol,
         side: req.side,
-        executedPrice: fillPrice,
-        quantity,
-        notionalUsd: req.amountUsd * (req.leverage || 1),
-        feeUsd,
+        executedPrice: 0,
+        quantity: 0,
+        notionalUsd: 0,
+        feeUsd: 0,
         timestamp: Date.now(),
-        isSimulated: true,
+        isSimulated: false,
+        error: `DRY-RUN: signal only, no order sent (${req.side} ~$${req.amountUsd} at ${currentPrice})`,
       };
     }
 
@@ -286,32 +298,5 @@ export class ExchangeClient {
       isSimulated: false,
       rawResponse: data,
     };
-  }
-
-  private generateSyntheticCandles(basePrice: number, limit: number): Candle[] {
-    const candles: Candle[] = [];
-    let current = basePrice;
-    const now = Date.now();
-    const stepMs = 60000;
-
-    for (let i = limit; i >= 0; i--) {
-      const delta = (Math.random() - 0.49) * (basePrice * 0.003);
-      const open = current;
-      const close = current + delta;
-      const high = Math.max(open, close) + Math.random() * (basePrice * 0.001);
-      const low = Math.min(open, close) - Math.random() * (basePrice * 0.001);
-      const volume = 20 + Math.random() * 80;
-
-      candles.push({
-        timestamp: now - i * stepMs,
-        open,
-        high,
-        low,
-        close,
-        volume,
-      });
-      current = close;
-    }
-    return candles;
   }
 }

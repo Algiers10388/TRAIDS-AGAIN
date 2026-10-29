@@ -310,7 +310,7 @@ export function scanCrossExchangeArbitrage(
 
 /**
  * Fetch real live quotes for all connected exchanges (Binance, Coinbase, Kraken, Bybit, NonKYC)
- * via the live-quotes backend proxy, with fallback to simulated exchange quotes.
+ * via the live-quotes backend proxy, with no simulated fallback.
  */
 export async function fetchLiveExchangeQuotes(
   symbol: string,
@@ -329,10 +329,9 @@ export async function fetchLiveExchangeQuotes(
     // Network or server error - fallback to deterministic dynamic model
   }
 
-  if (fallbackBasePrice && fallbackExchanges) {
-    return generateExchangeQuotes(symbol, fallbackBasePrice, fallbackExchanges);
-  }
-
+  // No simulated fallback: if live books are unavailable the caller gets no quotes.
+  void fallbackBasePrice;
+  void fallbackExchanges;
   return [];
 }
 

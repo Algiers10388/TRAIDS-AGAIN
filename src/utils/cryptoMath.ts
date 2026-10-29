@@ -607,38 +607,17 @@ export function computeIndicators(
   };
 }
 
+/**
+ * Synthetic candles were removed: charts and the bot only ever see real exchange candles.
+ * Kept as a stub so existing imports keep compiling; always returns an empty series.
+ */
 export function generateInitialCandles(
-  basePrice: number,
-  volatility: number,
-  count = 60,
-  intervalSeconds = 60
+  _basePrice?: number,
+  _volatility?: number,
+  _count = 60,
+  _intervalSeconds = 60
 ): Candle[] {
-  const candles: Candle[] = [];
-  let currentPrice = basePrice;
-  const now = Date.now();
-  const startTime = now - count * intervalSeconds * 1000;
-
-  for (let i = 0; i < count; i++) {
-    const time = startTime + i * intervalSeconds * 1000;
-    const changeFactor = (Math.random() - 0.49) * volatility;
-    const open = currentPrice;
-    const close = Math.max(open * (1 + changeFactor), 0.0001);
-    const high = Math.max(open, close) * (1 + Math.random() * volatility * 0.5);
-    const low = Math.min(open, close) * (1 - Math.random() * volatility * 0.5);
-    const volume = Math.floor(10000 + Math.random() * 50000);
-
-    candles.push({
-      time,
-      open,
-      high,
-      low,
-      close,
-      volume,
-    });
-    currentPrice = close;
-  }
-
-  return candles;
+  return [];
 }
 
 export function formatCurrency(value: number, decimals?: number): string {

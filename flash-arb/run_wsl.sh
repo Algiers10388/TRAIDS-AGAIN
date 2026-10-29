@@ -31,10 +31,11 @@ fi
 echo ""
 echo "=== [2/3] Compiling and Testing FlashArb Contracts ==="
 cd "$CONTRACTS_DIR"
+[ -d lib/forge-std ] || forge install --no-git foundry-rs/forge-std
 
 forge clean
 # In WSL, forge test runs against standard linux-amd64 artifacts
-forge test --fork-url https://arb1.arbitrum.io/rpc --fork-block-number 225000000 -vvv
+FORK_URL="${FORK_URL:-https://arb1.arbitrum.io/rpc}" forge test -vvv
 
 echo ""
 echo "=== [3/3] Launching Multi-Chain Searcher (Dry-Run Mode) ==="

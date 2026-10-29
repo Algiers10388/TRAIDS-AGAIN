@@ -3,7 +3,7 @@
 High-frequency, precision quantitative trading agent powered by **MACD (12, 26, 9)**, **Relative Strength Index (RSI 14)**, **Bollinger Bands (20, 2)**, **Regular Divergence Detection**, and **Multi-Factor Confluence Scoring (0–100%)**.
 
 Supports:
-- **Paper Trading / Dry-Run Mode**: Full simulation with realistic slippage, fee deductions, and live market prices without risking capital.
+- **Dry-Run Mode**: Evaluates live market data and logs signals only. No fills or positions are fabricated; pass `--live` with exchange keys to trade.
 - **Live Authenticated Execution**: Real HMAC-SHA256 signed order routing to **Binance**, **OKX**, **Coinbase**, **Bybit**, and **Kraken**.
 - **Dynamic Risk Management**: Dynamic fractional Kelly sizing, daily loss circuit breakers, stop-loss, take-profit targets, and peak-tracking trailing stops.
 

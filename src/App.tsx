@@ -455,6 +455,41 @@ export default function App() {
     };
   }, [selectedSymbol]);
 
+  // Poll real exchange reachability/latency probes from the server
+  useEffect(() => {
+    let isMounted = true;
+    const pollExchanges = async () => {
+      try {
+        const res = await fetch('/api/exchanges');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success || !Array.isArray(data.exchanges) || !isMounted) return;
+        setExchanges((prev) =>
+          prev.map((ex) => {
+            const live = data.exchanges.find((x: any) => x.id === ex.id);
+            return live
+              ? {
+                  ...ex,
+                  status: live.status,
+                  latencyMs: live.latencyMs ?? 0,
+                  enabled: live.enabled,
+                  hasApiKeyConfigured: live.hasApiKeyConfigured,
+                }
+              : ex;
+          })
+        );
+      } catch {
+        /* keep previous status */
+      }
+    };
+    pollExchanges();
+    const id = setInterval(pollExchanges, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(id);
+    };
+  }, []);
+
   // Real-time live exchange order book quotes state
   const [exchangeQuotes, setExchangeQuotes] = useState<ExchangeQuote[]>([]);
 
@@ -1175,52 +1210,6 @@ export default function App() {
     }
   };
 
-  // Handle Live Flash Loan Arbitrage Execution Broadcast from FlashArbBotDashboard
-  const handleFlashArbExecuted = (trade: {
-    symbol: string;
-    profitUsd: number;
-    chain: string;
-    txHash: string;
-    token: string;
-    gasSavedUsd?: number;
-    loanFeeSavedUsd?: number;
-  }) => {
-    const profit = Math.max(0, trade.profitUsd);
-    setPortfolio((prev) => {
-      const newCash = Number((prev.cash + profit).toFixed(2));
-      const realizedPnl = Number((prev.realizedPnl + profit).toFixed(2));
-      const totalTrades = prev.totalTrades + 1;
-      const winningTrades = prev.winningTrades + 1;
-      const peakEquity = Math.max(prev.peakEquity, newCash);
-
-      if (user?.uid) {
-        const updatedPortfolio: PortfolioState = {
-          ...prev,
-          cash: newCash,
-          realizedPnl,
-          totalTrades,
-          winningTrades,
-          peakEquity,
-        };
-        persistPortfolioToFirestore(user.uid, updatedPortfolio, positions, orders).catch(() => {});
-      }
-
-      return {
-        ...prev,
-        cash: newCash,
-        realizedPnl,
-        totalTrades,
-        winningTrades,
-        peakEquity,
-      };
-    });
-
-    setBotLogs((prev) => [
-      `[${new Date().toLocaleTimeString()}] ⚡ LIVE FLASH ARBITRAGE EXECUTED on ${trade.chain}: Borrowed 0% Balancer liquidity for ${trade.symbol}, routed direct pool swap, +$${profit.toFixed(2)} USD net alpha swept to profit vault. (Tx: ${trade.txHash.slice(0, 10)}...)`,
-      ...prev,
-    ]);
-  };
-
   // Close specific position using best routing
   const closePosition = (positionId: string, orderType: Order['type'] = 'MANUAL_CLOSE', reason = 'Manual Close') => {
     const now = Date.now();
@@ -1537,6 +1526,10 @@ export default function App() {
         if (strategy.circuitBreakerActive) {
           return;
         }
+        // Never trade before real candles have loaded
+        if ((candleMap[selectedSymbol]?.length ?? 0) < 30) {
+          return;
+        }
 
         const cooldownMs = strategy.cooldownSeconds * 1000 / simSpeed;
         const canExecute = now - lastOrderTimeRef.current >= cooldownMs;
@@ -1802,7 +1795,6 @@ export default function App() {
             availableAssets={assets}
             okxConnectedAddress={okxConnectedAddress}
             onOpenOkxWallet={() => setOkxWalletModalOpen(true)}
-            onArbitrageExecuted={handleFlashArbExecuted}
           />
         </main>
       ) : activeTab === 'WALLET_MONITOR' ? (

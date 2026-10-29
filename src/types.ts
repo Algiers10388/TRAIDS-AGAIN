@@ -422,9 +422,9 @@ export interface FiatAccount {
   allocatedToTrading: number;
   dailyDepositLimit: number;
   dailyDepositUsed: number;
-  kycTier: 'TIER_1_STANDARD' | 'TIER_2_ENHANCED_PRO';
+  kycTier: 'NONE' | 'TIER_1_STANDARD' | 'TIER_2_ENHANCED_PRO';
   twoFactorEnabled: boolean;
-  vaultEncryption: 'AES_256_GCM';
+  vaultEncryption: 'NONE' | 'AES_256_GCM';
   fdicCustodyInsured: boolean;
   linkedBanks: LinkedBankAccount[];
   linkedCards: LinkedDebitCard[];

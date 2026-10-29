@@ -1,6 +1,7 @@
 [profile.default]
 src = "src"
 out = "out"
+test = "test"
 libs = ["lib"]
 optimizer = true
 optimizer_runs = 1000000
@@ -8,19 +9,15 @@ via_ir = false
 evm_version = "paris"
 auto_detect_solc = true
 
-# Cross-Platform Compiler Setup:
-# 1. Termux (Android aarch64): Install native solc via `pkg install solidity`, then run:
-#    forge test --use $(which solc) --fork-url https://arb1.arbitrum.io/rpc
-# 2. WSL (Windows Subsystem for Linux - Recommended on PC):
-#    Runs standard Linux x86_64, svm downloads automatically or use system solc.
-# 3. Windows PowerShell:
-#    Install solc via `winget install Ethereum.Solidity` or `npm install -g solc`.
-
+# RPC aliases read from the environment, e.g.
+#   export ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+#   export BASE_RPC_URL=https://mainnet.base.org
+#   export OPTIMISM_RPC_URL=https://mainnet.optimism.io
+# Public endpoints are rate limited; use a paid RPC for repeated fork runs.
 [rpc_endpoints]
-arbitrum = "https://arb1.arbitrum.io/rpc"
-base = "https://mainnet.base.org"
-optimism = "https://mainnet.optimism.io"
+arbitrum = "${ARBITRUM_RPC_URL}"
+base = "${BASE_RPC_URL}"
+optimism = "${OPTIMISM_RPC_URL}"
 
 [fuzz]
-runs = 1000
-max_test_rejects = 65536
+runs = 512

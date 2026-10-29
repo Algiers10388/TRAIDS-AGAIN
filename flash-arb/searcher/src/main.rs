@@ -1,327 +1,210 @@
-use clap::Parser;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::signal;
-use tracing::{info, warn, error};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use ethers::prelude::*;
-
-mod config;
 mod abi;
+mod config;
+mod executor;
 mod monitor;
+mod risk;
 mod routes;
 mod sim;
-mod risk;
-mod executor;
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use clap::Parser;
+use ethers::prelude::*;
+use tracing::{error, info, warn};
 
 use config::ChainConfig;
-use monitor::{PriceMonitor, PoolSnapshot, PoolType};
-use routes::RouteFinder;
-use sim::RevmSimulator;
+use executor::Executor;
+use monitor::{discover_all, is_stable, EthOracle, PairMarket};
 use risk::RiskManager;
-use executor::TxExecutor;
 
 #[derive(Parser, Debug)]
-#[command(name = "flash-arb-searcher")]
-#[command(about = "High-Performance Multi-Chain DeFi Flash Loan Arbitrage Engine in Rust", long_about = None)]
+#[command(name = "flash-arb-searcher", about = "Aave V3 flash-loan arbitrage searcher (real on-chain quotes)")]
 struct Args {
-    /// Comma-separated list of chains to run (e.g. "arbitrum,base,optimism")
-    #[arg(short, long, default_value = "arbitrum,base,optimism")]
+    /// Comma separated chain config names (files in --config-dir), e.g. arbitrum,base,optimism
+    #[arg(long, default_value = "arbitrum,base,optimism")]
     chains: String,
-
-    /// Override dry-run mode (logs "would have profited" without broadcasting)
-    #[arg(short, long)]
-    dry_run: bool,
-
-    /// Config directory path
     #[arg(long, default_value = "config")]
     config_dir: PathBuf,
+    /// Actually send transactions. Without this flag the searcher only scans and simulates.
+    #[arg(long, default_value_t = false)]
+    live: bool,
+    /// Accepted for compatibility; scan-only is already the default.
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
 }
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,flash_arb_searcher=debug".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
-
     let args = Args::parse();
-    info!("============================================================");
-    info!("⚡ FLASH-ARB MULTI-CHAIN QUANTITATIVE SEARCHER INITIALIZING ⚡");
-    info!("============================================================");
 
-    let chain_names: Vec<&str> = args.chains.split(',').map(|s| s.trim()).collect();
-    let mut tasks = Vec::new();
-
-    for chain in chain_names {
-        let config_file = args.config_dir.join(format!("{}.toml", chain));
-        if !config_file.exists() {
-            error!("Config file not found for chain: {:?}", config_file);
-            continue;
+    let mut handles = Vec::new();
+    for name in args.chains.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let path = args.config_dir.join(format!("{}.toml", name));
+        let cfg = ChainConfig::load_from_file(&path).map_err(|e| eyre::eyre!("{}: {}", path.display(), e))?;
+        let live = args.live && !args.dry_run && !cfg.risk.dry_run;
+        if args.live && !live {
+            warn!("[{}] --live requested but risk.dry_run = true in the config: staying in scan-only mode", cfg.chain_name);
         }
-
-        let mut config = ChainConfig::load_from_file(&config_file)?;
-        if args.dry_run {
-            config.risk.dry_run = true;
-        }
-
-        info!(
-            "Spawning independent Tokio Searcher task for: {} (Chain ID: {}, Dry Run: {})",
-            config.chain_name.to_uppercase(), config.chain_id, config.risk.dry_run
-        );
-
-        let task = tokio::spawn(async move {
-            if let Err(e) = run_chain_worker(config).await {
-                error!("Searcher worker failed on chain: {:?}", e);
+        let chain = cfg.chain_name.clone();
+        handles.push(tokio::spawn(async move {
+            if let Err(e) = run_chain(cfg, live).await {
+                error!("[{}] worker stopped: {:#}", chain, e);
             }
-        });
-        tasks.push(task);
+        }));
     }
-
-    info!("All chain searcher workers spawned successfully. Awaiting SIGINT/Ctrl+C...");
-    signal::ctrl_c().await?;
-    info!("Received graceful shutdown signal. Exiting searcher cleanly.");
+    if handles.is_empty() {
+        eyre::bail!("no chains selected");
+    }
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => info!("shutting down"),
+        _ = futures_join(handles) => warn!("all chain workers have stopped"),
+    }
     Ok(())
 }
 
-/// Dynamically resolves live ETH/USD price from public API or on-chain oracle
-async fn fetch_live_eth_price() -> f64 {
-    // 1. Try Binance public ticker endpoint
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build();
-
-    if let Ok(c) = client {
-        if let Ok(res) = c.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT").send().await {
-            if let Ok(json) = res.json::<serde_json::Value>().await {
-                if let Some(price_str) = json.get("price").and_then(|p| p.as_str()) {
-                    if let Ok(val) = price_str.parse::<f64>() {
-                        if val > 100.0 {
-                            return val;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Fallback to CoinGecko
-        if let Ok(res) = c.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd").send().await {
-            if let Ok(json) = res.json::<serde_json::Value>().await {
-                if let Some(val) = json.get("ethereum").and_then(|e| e.get("usd")).and_then(|u| u.as_f64()) {
-                    if val > 100.0 {
-                        return val;
-                    }
-                }
-            }
-        }
+async fn futures_join(handles: Vec<tokio::task::JoinHandle<()>>) {
+    for h in handles {
+        let _ = h.await;
     }
-
-    2850.0
 }
 
-/// Independent searcher worker loop for an individual EVM blockchain
-async fn run_chain_worker(config: ChainConfig) -> eyre::Result<()> {
-    let chain_name = config.chain_name.clone();
-    let monitor = Arc::new(PriceMonitor::new(config.clone()));
-    let route_finder = RouteFinder::new(config.clone());
-    let simulator = RevmSimulator::new(config.clone());
-    let risk_manager = RiskManager::new(config.risk.clone());
-    let executor = TxExecutor::new(config.clone(), risk_manager.clone());
+async fn run_chain(cfg: ChainConfig, live: bool) -> eyre::Result<()> {
+    let provider = Provider::<Http>::try_from(cfg.rpc_http.as_str())?;
+    let remote_chain = provider.get_chainid().await?.as_u64();
+    if remote_chain != cfg.chain_id {
+        eyre::bail!("RPC reports chain id {} but config says {}", remote_chain, cfg.chain_id);
+    }
+    let contract = cfg.flash_arb_address()?;
+    let signer = cfg.signer_address()?;
+    let recipient = cfg.profit_recipient()?;
+    let risk = RiskManager::new(cfg.risk.clone());
 
-    // Dynamically resolve real-time ETH price (Never hardcoded!)
-    let mut live_eth_price = fetch_live_eth_price().await;
-    info!("[{}] Dynamic ETH price initialized: ${:.2} USD", chain_name, live_eth_price);
-
-    // Seed initial pools for monitored tokens on this chain
-    seed_chain_pools(&monitor, &config);
-
-    // Spawn WebSocket Price Monitor in background
-    let monitor_clone = monitor.clone();
-    tokio::spawn(async move {
-        if let Err(e) = monitor_clone.run().await {
-            error!("Monitor crashed: {:?}", e);
+    let executor = if live {
+        Some(Executor::new(&cfg, &provider).await?)
+    } else {
+        if !contract.is_zero() {
+            // Read-only sanity checks so a mis-configured contract is caught even when scanning.
+            let owner = abi::contract_owner(&provider, contract).await?;
+            if owner != signer {
+                eyre::bail!("FlashArb owner is {:?} but signer.gas_wallet_address is {:?}", owner, signer);
+            }
         }
-    });
+        info!("[{}] SCAN-ONLY mode: opportunities are quoted and simulated, nothing is sent", cfg.chain_name);
+        None
+    };
 
-    info!(
-        "[{}] Worker loop active: scanning {} DEX pools across {} whitelisted tokens...",
-        chain_name, monitor.pools.len(), config.tokens.len()
-    );
-
-    let provider = Provider::<Http>::try_from(&config.rpc_http)?;
-    let mut interval = tokio::time::interval(std::time::Duration::from_millis(400));
-    let mut tick_counter: u64 = 0;
+    let oracle = EthOracle::new(&cfg, &provider)
+        .await
+        .ok_or_else(|| eyre::eyre!("cannot price ETH on-chain (need a WETH/stable pool); refusing to run blind"))?;
+    let mut markets: Vec<PairMarket> = discover_all(&cfg, &provider).await;
+    let mut eth_usd = oracle.eth_usd(&provider).await.unwrap_or(0.0);
+    let mut last_block = 0u64;
+    let mut ticks = 0u64;
+    let mut ticker = tokio::time::interval(Duration::from_millis(cfg.poll_interval_ms.max(200)));
 
     loop {
-        interval.tick().await;
-        tick_counter += 1;
+        ticker.tick().await;
+        let head = match provider.get_block_number().await {
+            Ok(b) => b.as_u64(),
+            Err(e) => {
+                warn!("[{}] get_block_number: {}", cfg.chain_name, e);
+                continue;
+            }
+        };
+        if head == last_block {
+            continue;
+        }
+        last_block = head;
+        ticks += 1;
 
-        // 1. Periodically refresh dynamic ETH price every ~30 seconds (75 ticks)
-        if tick_counter % 75 == 0 {
-            let updated = fetch_live_eth_price().await;
-            if (updated - live_eth_price).abs() > 0.01 {
-                live_eth_price = updated;
-                tracing::debug!("[{}] Dynamic ETH price refreshed: ${:.2}", chain_name, live_eth_price);
+        if ticks % 1000 == 0 {
+            markets = discover_all(&cfg, &provider).await;
+        }
+        if ticks % 20 == 1 {
+            match oracle.eth_usd(&provider).await {
+                Some(p) => eth_usd = p,
+                None => warn!("[{}] ETH/USD quote failed; keeping last value", cfg.chain_name),
             }
         }
+        if eth_usd <= 0.0 {
+            continue;
+        }
+        if risk.is_tripped() {
+            warn!("[{}] circuit breaker tripped; not scanning. Restart after investigating.", cfg.chain_name);
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        }
 
-        // 2. Fetch current block and current gas price from chain RPC
-        let current_block = *monitor.latest_block.read().await;
-        let gas_price_wei = provider
-            .get_gas_price()
-            .await
-            .unwrap_or_else(|_| U256::from(100_000_000)); // ~0.1 gwei L2 fallback
-
-        // 3. Active Cross-DEX Opportunity Scanning across Whitelisted Tokens
-        for (symbol, token_addr_str) in &config.tokens {
-            if config.risk.excluded_tokens.contains(token_addr_str) {
+        let gas_price = match provider.get_gas_price().await {
+            Ok(g) => g,
+            Err(e) => {
+                warn!("[{}] get_gas_price: {}", cfg.chain_name, e);
                 continue;
             }
+        };
 
-            let Ok(token_a) = token_addr_str.parse::<Address>() else { continue; };
-
-            // Find all registered pools for this token
-            let matching_pools: Vec<PoolSnapshot> = monitor
-                .pools
-                .iter()
-                .filter(|entry| {
-                    let pool = entry.value();
-                    match &pool.pool_type {
-                        PoolType::UniswapV2 { token0, token1, .. } => *token0 == token_a || *token1 == token_a,
-                        PoolType::UniswapV3 { token0, token1, .. } => *token0 == token_a || *token1 == token_a,
-                        PoolType::Curve { token0, token1, .. } => *token0 == token_a || *token1 == token_a,
-                    }
-                })
-                .map(|entry| entry.value().clone())
-                .collect();
-
-            if matching_pools.len() < 2 {
+        for m in &markets {
+            if risk.is_excluded(m.base) || risk.is_excluded(m.quote) {
                 continue;
             }
+            let base_usd = if is_stable(&m.base_sym) { 1.0 } else { eth_usd };
+            let max_amount = U256::from((cfg.risk.max_loan_usd / base_usd * 10f64.powi(m.base_dec as i32)) as u128);
+            let Some(opp) = routes::find_best(&cfg, &provider, m, max_amount).await else { continue };
 
-            // Cross-DEX comparison: evaluate all pool pairs
-            for i in 0..matching_pools.len() {
-                for j in (i + 1)..matching_pools.len() {
-                    let pool_a = &matching_pools[i];
-                    let pool_b = &matching_pools[j];
-                    if pool_a.pool_address == pool_b.pool_address {
+            let gross_usd = opp.gross_profit_f64() * base_usd;
+            if gross_usd <= cfg.risk.min_net_profit_usd {
+                continue; // gas can only make it worse; skip the simulation
+            }
+            let min_profit = (opp.gross_profit * U256::from(80u64) / U256::from(100u64)).max(U256::one());
+            let calldata = abi::encode_execute_flash_arb(opp.base, opp.amount_in, min_profit, &opp.leg1(), &opp.leg2(), recipient);
+
+            let gas = if contract.is_zero() {
+                info!("[{}] no flash_arb_contract configured: skipping on-chain simulation", cfg.chain_name);
+                400_000
+            } else {
+                match sim::simulate(&provider, signer, contract, calldata.clone()).await {
+                    Ok(g) => g,
+                    Err(e) => {
+                        info!("[{}] block {} {} {} -> {}: simulation rejected: {}", cfg.chain_name, head, opp.pair_label, opp.venue_a.label(), opp.venue_b.label(), e);
                         continue;
                     }
-
-                    let base_price = if symbol == "WETH" {
-                        live_eth_price
-                    } else if symbol == "WBTC" {
-                        live_eth_price * 23.2
-                    } else if symbol == "ARB" {
-                        0.65
-                    } else if symbol == "OP" {
-                        1.65
-                    } else {
-                        1.0 // USDC / USDT / DAI
-                    };
-
-                    // CALL ROUTE FINDER
-                    if let Some(opp) = route_finder.find_opportunity(
-                        token_a,
-                        Address::zero(),
-                        symbol,
-                        pool_a,
-                        pool_b,
-                        base_price,
-                        gas_price_wei,
-                        live_eth_price,
-                    ) {
-                        info!(
-                            "💡 [{}] Arbitrage Opportunity Discovered! {} | Spread: {:.2} bps | Optimal Loan: {} | Net: ${:.2}",
-                            chain_name, opp.asset_symbol, opp.spread_bps, opp.optimal_loan_amount, opp.net_profit_usd
-                        );
-
-                        // CALL REVM SIMULATOR
-                        match simulator.simulate_opportunity(&opp, current_block, live_eth_price).await {
-                            Ok(sim_result) => {
-                                if sim_result.success {
-                                    info!(
-                                        "✅ [{}] revm Pre-Flight PASSED: Gas: {} | Executing trade...",
-                                        chain_name, sim_result.gas_used
-                                    );
-
-                                    // CALL TX EXECUTOR
-                                    if let Err(exec_err) = executor.execute_or_dry_run(&opp, &sim_result, live_eth_price).await {
-                                        error!("[{}] Execution error: {:?}", chain_name, exec_err);
-                                    }
-                                } else {
-                                    tracing::debug!(
-                                        "[{}] Simulation rejected: {:?}",
-                                        chain_name, sim_result.error_message
-                                    );
-                                }
-                            }
-                            Err(sim_err) => {
-                                warn!("[{}] Simulation error: {:?}", chain_name, sim_err);
-                            }
-                        }
-                    }
                 }
-            }
-        }
-
-        // Periodic heartbeat status log every 10 seconds (25 ticks)
-        if tick_counter % 25 == 0 {
-            let daily_loss = *risk_manager.daily_gas_loss_usd.read().await;
+            };
+            let gas_cost_usd = gas as f64 * (gas_price.as_u128() as f64 / 1e18) * eth_usd;
+            let net_usd = gross_usd - gas_cost_usd - cfg.risk.extra_cost_usd;
             info!(
-                "[{}] Heartbeat | Block #{} | ETH: ${:.2} | Pools: {} | Daily Gas Lost: ${:.2}",
-                chain_name, current_block, live_eth_price, monitor.pools.len(), daily_loss
+                "[{}] block {} {} sell {} / buy {}: loan {:.4} {} gross ${:.2} gas ${:.2} net ${:.2}",
+                cfg.chain_name, head, opp.pair_label, opp.venue_a.label(), opp.venue_b.label(),
+                opp.amount_in.as_u128() as f64 / 10f64.powi(m.base_dec as i32), m.base_sym, gross_usd, gas_cost_usd, net_usd
             );
-        }
-    }
-}
-
-/// Registers known liquidity venues into the monitor state
-fn seed_chain_pools(monitor: &PriceMonitor, config: &ChainConfig) {
-    let weth = config.tokens.get("WETH").and_then(|s| s.parse::<Address>().ok()).unwrap_or_default();
-    let usdc = config.tokens.get("USDC").and_then(|s| s.parse::<Address>().ok()).unwrap_or_default();
-
-    // Uniswap V3 Pool
-    if let Some(uni_cfg) = config.dexes.get("uniswap_v3") {
-        if let Some(r) = &uni_cfg.router {
-            if let Ok(router_addr) = r.parse::<Address>() {
-                monitor.register_pool(PoolSnapshot {
-                    pool_address: router_addr,
-                    dex_name: "Uniswap V3".to_string(),
-                    pool_type: PoolType::UniswapV3 {
-                        sqrt_price_x96: U256::from(158456325028528675187087900672u128), // ~2850 USD
-                        tick: 200500,
-                        liquidity: 50_000_000_000_000_000_000u128,
-                        fee: 500,
-                        token0: weth,
-                        token1: usdc,
-                    },
-                    last_updated_block: 0,
-                });
+            if net_usd < cfg.risk.min_net_profit_usd {
+                continue;
             }
-        }
-    }
-
-    // Secondary DEX Pool (Camelot on Arbitrum, Aerodrome on Base, Velodrome on Optimism)
-    for (dex_id, dex_cfg) in &config.dexes {
-        if dex_id == "uniswap_v3" { continue; }
-        if let Some(r) = &dex_cfg.router {
-            if let Ok(router_addr) = r.parse::<Address>() {
-                monitor.register_pool(PoolSnapshot {
-                    pool_address: router_addr,
-                    dex_name: dex_id.to_uppercase(),
-                    pool_type: PoolType::UniswapV2 {
-                        reserve0: U256::from(100) * U256::exp10(18), // 100 WETH
-                        reserve1: U256::from(285_800) * U256::exp10(6), // 285.8k USDC (+28 bps spread)
-                        token0: weth,
-                        token1: usdc,
-                        fee_bps: 30,
-                    },
-                    last_updated_block: 0,
-                });
+            let Some(exec) = &executor else {
+                info!("[{}] scan-only: would execute (net ${:.2})", cfg.chain_name, net_usd);
+                continue;
+            };
+            if let Err(why) = risk.can_execute(&[opp.base, opp.quote], gas) {
+                warn!("[{}] risk check blocked trade: {}", cfg.chain_name, why);
+                continue;
             }
+            match exec.send(&provider, contract, calldata, gas, net_usd, eth_usd).await {
+                Ok(o) if o.success => {
+                    risk.record_success();
+                    info!("[{}] SUCCESS {:?} gas {}", cfg.chain_name, o.hash, o.gas_used);
+                }
+                Ok(o) => {
+                    let lost = o.gas_used.as_u128() as f64 * (o.effective_gas_price.as_u128() as f64 / 1e18) * eth_usd;
+                    risk.record_revert(lost);
+                    error!("[{}] REVERTED {:?}", cfg.chain_name, o.hash);
+                }
+                Err(e) => error!("[{}] send failed: {:#}", cfg.chain_name, e),
+            }
+            break; // state changed; rescan on next block
         }
     }
 }

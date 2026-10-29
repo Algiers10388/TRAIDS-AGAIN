@@ -2,31 +2,23 @@
 name = "flash-arb-searcher"
 version = "0.1.0"
 edition = "2021"
-description = "Production multi-chain DeFi Flash Loan Arbitrage Rust Searcher"
-authors = ["Quantitative MEV Engine"]
+description = "Multi-chain DeFi flash loan arbitrage searcher (Aave V3 + Uniswap V2/V3 + Solidly forks)"
 
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
-ethers = { version = "2.0", features = ["ws", "rustls", "ipc"] }
-revm = { version = "9.0", features = ["std", "serde"] }
-uniswap-v3-math = "0.4"
+ethers = { version = "2.0", features = ["ws", "rustls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
-reqwest = { version = "0.12", features = ["json"] }
 clap = { version = "4.5", features = ["derive"] }
-async-trait = "0.1"
-dashmap = "5.5"
-futures-util = "0.3"
-num-bigint = "0.4"
-num-traits = "0.2"
 
+# NOTE: no `panic = "abort"`. Each chain worker runs in its own tokio task, so a panic
+# in one chain must not take the others down.
 [profile.release]
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
 strip = true

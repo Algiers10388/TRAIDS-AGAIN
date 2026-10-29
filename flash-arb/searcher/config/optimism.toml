@@ -1,19 +1,15 @@
-# ==============================================================================
-# Optimism Mainnet (Chain ID: 10) FlashArb Searcher Configuration
-# ==============================================================================
-
+# Optimism (chain id 10)
+# RPC endpoints: override with env RPC_HTTP_OPTIMISM / RPC_WS_OPTIMISM.
 chain_id = 10
 chain_name = "optimism"
-
 rpc_http = "https://mainnet.optimism.io"
-rpc_ws = "wss://optimism-mainnet.public.blastapi.io"
-
-relay_endpoint = "https://optimism.builder-relay.io"
+rpc_ws = ""
+relay_endpoint = ""
 is_l2 = true
-sequencer_priority_bidding = true
+priority_fee_bidding = true
 tip_share_percent = 60
+poll_interval_ms = 1000
 
-# Aave V3 on Optimism
 aave_v3_pool = "0x794a61358D6845594F94dc1DB02A252b5b4814aD"
 aave_v3_addresses_provider = "0xa97684ead0e402dC232d5A977953DF7ECBAB3CDb"
 aave_flash_fee_bps = 5
@@ -21,13 +17,30 @@ aave_flash_fee_bps = 5
 flash_arb_contract = "0x0000000000000000000000000000000000000000"
 
 [dexes.uniswap_v3]
+kind = "v3_router02"
 router = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
 quoter = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+quoter_v2 = false
 factory = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 
+# Velodrome V2 router + V2 PoolFactory. VERIFY both addresses against Velodrome's docs before going live;
+# the old config pointed at the V1 factory, which does not match this router.
 [dexes.velodrome]
+kind = "solidly"
 router = "0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858"
-factory = "0x25CbdDb98b35ab1FF77413456B31EC81A6B6B746"
+factory = "0xF1046053aa5682b4F9a81b5481394DA16BE5FF5a"
+
+[[pairs]]
+base = "WETH"
+quote = "USDC"
+
+[[pairs]]
+base = "WETH"
+quote = "USDT"
+
+[[pairs]]
+base = "WETH"
+quote = "OP"
 
 [tokens]
 WETH = "0x4200000000000000000000000000000000000006"
@@ -40,8 +53,9 @@ min_net_profit_usd = 7.00
 max_gas_per_tx = 800000
 daily_revert_loss_cap_usd = 60.00
 consecutive_failure_limit = 3
-dry_run = false
-simulation_engine = "revm"
+dry_run = true
+max_loan_usd = 25000.0
+extra_cost_usd = 0.10
 excluded_tokens = []
 
 [beneficiary]
@@ -51,6 +65,5 @@ auto_sweep = true
 
 [signer]
 gas_wallet_address = "0xF1d765d693f9e6fAb0c4a2FCa942d9D54233C966"
-label = "Optimism Mainnet Gas Funder"
+label = "Optimism Gas Funder"
 private_key_env = "FLASH_ARB_SIGNER_KEY"
-

@@ -14,14 +14,16 @@ if (Test-Path "$PSScriptRoot\contracts") {
     Set-Location "$PSScriptRoot"
 }
 
+if (-not (Test-Path "lib\forge-std")) { forge install --no-git foundry-rs/forge-std }
+
 if ($solcCmd) {
     Write-Host "Found local Solidity compiler: $($solcCmd.Source)" -ForegroundColor Green
     Write-Host "=== [2/3] Compiling and Testing FlashArb Contracts ===" -ForegroundColor Cyan
-    forge test --use $solcCmd.Source --fork-url https://arb1.arbitrum.io/rpc --fork-block-number 225000000 -vvv
+    $env:FORK_URL = if ($env:FORK_URL) { $env:FORK_URL } else { "https://arb1.arbitrum.io/rpc" }; forge test --use $solcCmd.Source -vvv
 } else {
     Write-Host "Running forge with default solc..." -ForegroundColor Yellow
     Write-Host "=== [2/3] Compiling and Testing FlashArb Contracts ===" -ForegroundColor Cyan
-    forge test --fork-url https://arb1.arbitrum.io/rpc --fork-block-number 225000000 -vvv
+    $env:FORK_URL = if ($env:FORK_URL) { $env:FORK_URL } else { "https://arb1.arbitrum.io/rpc" }; forge test -vvv
 }
 
 Write-Host "=== [3/3] Launching Rust Searcher (Dry-Run Mode) ===" -ForegroundColor Cyan

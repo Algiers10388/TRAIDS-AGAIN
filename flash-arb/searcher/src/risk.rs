@@ -1,92 +1,107 @@
-use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{warn, error};
-use crate::config::RiskConfig;
+use ethers::types::Address;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{error, warn};
+
+use crate::config::{parse_addr, RiskConfig};
+
+#[derive(Debug)]
+struct State {
+    consecutive_reverts: u32,
+    tripped: bool,
+    day: u64,
+    daily_gas_loss_usd: f64,
+}
 
 #[derive(Debug, Clone)]
 pub struct RiskManager {
     pub config: RiskConfig,
-    pub consecutive_reverts: Arc<AtomicU32>,
-    pub circuit_breaker_tripped: Arc<AtomicBool>,
-    pub daily_gas_loss_usd: Arc<RwLock<f64>>,
+    excluded: Arc<Vec<Address>>,
+    state: Arc<Mutex<State>>,
+}
+
+fn utc_day() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0)
 }
 
 impl RiskManager {
     pub fn new(config: RiskConfig) -> Self {
+        let excluded = config
+            .excluded_tokens
+            .iter()
+            .filter_map(|s| parse_addr(s).ok())
+            .collect::<Vec<_>>();
         Self {
             config,
-            consecutive_reverts: Arc::new(AtomicU32::new(0)),
-            circuit_breaker_tripped: Arc::new(AtomicBool::new(false)),
-            daily_gas_loss_usd: Arc::new(RwLock::new(0.0)),
+            excluded: Arc::new(excluded),
+            state: Arc::new(Mutex::new(State {
+                consecutive_reverts: 0,
+                tripped: false,
+                day: utc_day(),
+                daily_gas_loss_usd: 0.0,
+            })),
         }
     }
 
-    /// Pre-execution safety check
-    pub async fn can_execute(&self, token_address: &str, gas_units: u64) -> Result<(), &'static str> {
-        // 1. Check Circuit Breaker
-        if self.circuit_breaker_tripped.load(Ordering::SeqCst) {
-            return Err("Circuit breaker is TRIPPED due to consecutive reverts");
+    fn roll_day(st: &mut State) {
+        let today = utc_day();
+        if st.day != today {
+            st.day = today;
+            st.daily_gas_loss_usd = 0.0;
         }
+    }
 
-        // 2. Token Allowlist: Exclude fee-on-transfer or rebasing tokens
-        let clean_addr = token_address.to_lowercase();
-        for excluded in &self.config.excluded_tokens {
-            if excluded.to_lowercase() == clean_addr {
-                return Err("Token is in the excluded/rebasing/fee-on-transfer blacklist");
-            }
+    pub fn is_excluded(&self, token: Address) -> bool {
+        self.excluded.contains(&token)
+    }
+
+    pub fn daily_loss(&self) -> f64 {
+        let mut st = self.state.lock().unwrap();
+        Self::roll_day(&mut st);
+        st.daily_gas_loss_usd
+    }
+
+    pub fn is_tripped(&self) -> bool {
+        self.state.lock().unwrap().tripped
+    }
+
+    /// Pre-execution safety check. Returns the reason when a trade must not be sent.
+    pub fn can_execute(&self, tokens: &[Address], gas_units: u64) -> Result<(), String> {
+        let mut st = self.state.lock().unwrap();
+        Self::roll_day(&mut st);
+        if st.tripped {
+            return Err("circuit breaker is tripped".into());
         }
-
-        // 3. Max Gas Cap Per Tx
+        if tokens.iter().any(|t| self.excluded.contains(t)) {
+            return Err("token is on the excluded list".into());
+        }
         if gas_units > self.config.max_gas_per_tx {
-            return Err("Estimated gas units exceed max_gas_per_tx limit");
+            return Err(format!("gas {} exceeds max_gas_per_tx {}", gas_units, self.config.max_gas_per_tx));
         }
-
-        // 4. Daily Gas Loss Cap
-        let daily_loss = *self.daily_gas_loss_usd.read().await;
-        if daily_loss >= self.config.daily_revert_loss_cap_usd {
-            self.circuit_breaker_tripped.store(true, Ordering::SeqCst);
-            return Err("Daily revert gas loss cap exceeded. Emergency Kill Switch engaged.");
+        if st.daily_gas_loss_usd >= self.config.daily_revert_loss_cap_usd {
+            st.tripped = true;
+            return Err("daily revert-loss cap reached".into());
         }
-
         Ok(())
     }
 
-    /// Records successful execution: resets consecutive revert counter
     pub fn record_success(&self) {
-        self.consecutive_reverts.store(0, Ordering::SeqCst);
+        self.state.lock().unwrap().consecutive_reverts = 0;
     }
 
-    /// Records revert: increments failure count and tracks lost gas dollar value
-    pub async fn record_revert(&self, gas_spent_usd: f64) {
-        let fails = self.consecutive_reverts.fetch_add(1, Ordering::SeqCst) + 1;
-        warn!("Recorded on-chain revert #{}. Gas lost: ${:.2}", fails, gas_spent_usd);
-
-        let mut daily_loss = self.daily_gas_loss_usd.write().await;
-        *daily_loss += gas_spent_usd;
-
-        // Trip Circuit Breaker if consecutive failures exceed limit
-        if fails >= self.config.consecutive_failure_limit {
-            error!(
-                "CIRCUIT BREAKER TRIPPED! {} consecutive reverts reached. Halting automated execution.",
-                fails
-            );
-            self.circuit_breaker_tripped.store(true, Ordering::SeqCst);
+    pub fn record_revert(&self, gas_spent_usd: f64) {
+        let mut st = self.state.lock().unwrap();
+        Self::roll_day(&mut st);
+        st.consecutive_reverts += 1;
+        st.daily_gas_loss_usd += gas_spent_usd;
+        warn!("on-chain revert #{} (gas lost ${:.2}, today ${:.2})", st.consecutive_reverts, gas_spent_usd, st.daily_gas_loss_usd);
+        if st.consecutive_reverts >= self.config.consecutive_failure_limit {
+            error!("CIRCUIT BREAKER TRIPPED after {} consecutive reverts", st.consecutive_reverts);
+            st.tripped = true;
         }
-
-        // Check Daily Cap
-        if *daily_loss >= self.config.daily_revert_loss_cap_usd {
-            error!(
-                "DAILY LOSS CAP REACHED! Total gas lost: ${:.2} (Limit: ${:.2}). Halting searcher.",
-                *daily_loss, self.config.daily_revert_loss_cap_usd
-            );
-            self.circuit_breaker_tripped.store(true, Ordering::SeqCst);
+        if st.daily_gas_loss_usd >= self.config.daily_revert_loss_cap_usd {
+            error!("DAILY LOSS CAP reached (${:.2} >= ${:.2})", st.daily_gas_loss_usd, self.config.daily_revert_loss_cap_usd);
+            st.tripped = true;
         }
-    }
-
-    /// Manual or automated reset of the circuit breaker
-    pub fn reset_circuit_breaker(&self) {
-        self.consecutive_reverts.store(0, Ordering::SeqCst);
-        self.circuit_breaker_tripped.store(false, Ordering::SeqCst);
     }
 }
