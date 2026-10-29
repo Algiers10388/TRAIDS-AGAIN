@@ -631,8 +631,9 @@ class LiveMevAgent {
   private loopTimer: NodeJS.Timeout | null = null;
   public isScanning: boolean = false;
 
-  // Dynamic Parameter & Profit Guard Settings
-  public minProfitThresholdUsd: number = 1.00; // Strict Profit Guard threshold ($1.00 min net profit)
+  // Dynamic Parameter & Profit Guard Settings (Minimum $0.01 floor, NO maximum cap / unbounded upside)
+  public minProfitThresholdUsd: number = 0.01; // Strict Profit Guard threshold ($0.01 min net profit, no maximum limit)
+  public maxProfitCap: null = null; // No upper bound or ceiling on profit (unbounded upside)
   public gasOptimizationMode: 'ECO' | 'HYPER_ALPHA' | 'AGGRESSIVE' = 'HYPER_ALPHA';
   public autoOptimizeSize: boolean = true; // Dynamically scale loan amount to pool liquidity
   public isAutonomousExecutionEnabled: boolean = false; // Auto-executes when profit guard cleared
@@ -739,7 +740,7 @@ class LiveMevAgent {
       if (netProfitUsd >= this.minProfitThresholdUsd) {
         isProfitable = true;
         profitGuardStatus = 'PROFIT_SECURED';
-        profitGuardReason = `Profit Guard Passed: Projected net profit +$${netProfitUsd.toFixed(2)} exceeds min threshold ($${this.minProfitThresholdUsd.toFixed(2)}). Optimal size ${optimalLoanWeth} WETH consumes minimal ${optimalGasLimit.toLocaleString()} gas (${gasSavingsPercent}% saved).`;
+        profitGuardReason = `Profit Guard Passed: Projected net profit +$${netProfitUsd.toFixed(2)} meets min threshold ($${this.minProfitThresholdUsd.toFixed(2)}) with zero max ceiling (unbounded profit upside). Optimal size ${optimalLoanWeth} WETH consumes minimal ${optimalGasLimit.toLocaleString()} gas (${gasSavingsPercent}% saved).`;
       } else {
         isProfitable = false;
         profitGuardStatus = 'REVERT_PROTECTION_BLOCKED';
@@ -1069,6 +1070,7 @@ flashArbRouter.get('/agent/status', (_req: Request, res: Response) => {
     profitWallet: process.env.FLASH_ARB_PROFIT_WALLET || DEFAULT_PROFIT_WALLET,
     config: {
       minProfitThresholdUsd: liveAgent.minProfitThresholdUsd,
+      maxProfitCap: null, // No maximum profit cap (unbounded upside)
       gasOptimizationMode: liveAgent.gasOptimizationMode,
       autoOptimizeSize: liveAgent.autoOptimizeSize,
       isAutonomousExecutionEnabled: liveAgent.isAutonomousExecutionEnabled,
@@ -1085,6 +1087,7 @@ flashArbRouter.get('/agent/config', (_req: Request, res: Response) => {
   res.json({
     success: true,
     minProfitThresholdUsd: liveAgent.minProfitThresholdUsd,
+    maxProfitCap: null, // No maximum profit cap (unbounded upside)
     gasOptimizationMode: liveAgent.gasOptimizationMode,
     autoOptimizeSize: liveAgent.autoOptimizeSize,
     isAutonomousExecutionEnabled: liveAgent.isAutonomousExecutionEnabled,
@@ -1120,6 +1123,7 @@ flashArbRouter.post('/agent/config', (req: Request, res: Response) => {
       message: 'Agent optimizer parameters and profit guard updated successfully',
       config: {
         minProfitThresholdUsd: liveAgent.minProfitThresholdUsd,
+        maxProfitCap: null,
         gasOptimizationMode: liveAgent.gasOptimizationMode,
         autoOptimizeSize: liveAgent.autoOptimizeSize,
         isAutonomousExecutionEnabled: liveAgent.isAutonomousExecutionEnabled,

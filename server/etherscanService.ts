@@ -207,7 +207,7 @@ class EtherscanIntelligenceService {
   private agents: EtherscanAgentState[] = [...INITIAL_AGENTS];
   private isPolling = false;
   private autoExecutionEnabled = false;
-  private minProfitThresholdPercent = 0.20; // 0.20% net profit
+  private minProfitThresholdPercent = 0.01; // 0.01% net profit minimum (no max ceiling / unbounded upside)
   private executedSignalsLog: Array<{
     signalId: string;
     targetAsset: string;
