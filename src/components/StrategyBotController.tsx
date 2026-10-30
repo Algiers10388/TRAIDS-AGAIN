@@ -196,29 +196,43 @@ export const StrategyBotController: React.FC<StrategyBotControllerProps> = ({
             </div>
           </div>
 
-          {onOpenDepositToBot && (
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {botCash < 30 && onQuickFundMargin && (
               <button
                 type="button"
-                onClick={() => onOpenDepositToBot('BANK')}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold cursor-pointer transition-all hover:scale-[1.02] shadow-sm"
-                title="Deposit directly from connected bank into Bot Trading Cash"
+                onClick={onQuickFundMargin}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md transition-all shrink-0 animate-pulse"
+                title="1-Click fund $1,000 trading margin to enable automated algorithmic orders"
               >
-                <Building2 className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Fund via Bank</span>
+                <Zap className="h-3.5 w-3.5 fill-current" />
+                <span>+ Load $1,000 Margin</span>
               </button>
+            )}
 
-              <button
-                type="button"
-                onClick={() => onOpenDepositToBot('CARD')}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold cursor-pointer transition-all hover:scale-[1.02] shadow-sm"
-                title="Deposit directly from check or debit card into Bot Trading Cash"
-              >
-                <CreditCard className="h-3.5 w-3.5 text-cyan-400" />
-                <span>Fund via Check Card</span>
-              </button>
-            </div>
-          )}
+            {onOpenDepositToBot && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onOpenDepositToBot('BANK')}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold cursor-pointer transition-all hover:scale-[1.02] shadow-sm"
+                  title="Deposit directly from connected bank into Bot Trading Cash"
+                >
+                  <Building2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>Fund via Bank</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenDepositToBot('CARD')}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold cursor-pointer transition-all hover:scale-[1.02] shadow-sm"
+                  title="Deposit directly from check or debit card into Bot Trading Cash"
+                >
+                  <CreditCard className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>Fund via Check Card</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 

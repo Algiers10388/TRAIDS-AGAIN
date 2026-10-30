@@ -676,7 +676,7 @@ class LiveMevAgent {
   public maxProfitCap: null = null; // No upper bound or ceiling on profit (unbounded upside)
   public gasOptimizationMode: 'ECO' | 'HYPER_ALPHA' | 'AGGRESSIVE' = 'HYPER_ALPHA';
   public autoOptimizeSize: boolean = true; // Dynamically scale loan amount to pool liquidity
-  public isAutonomousExecutionEnabled: boolean = false; // Auto-executes when profit guard cleared
+  public isAutonomousExecutionEnabled: boolean = true; // Auto-executes live on-chain when profit guard cleared
   public lastExecutionTimestamp: number = 0;
 
   constructor() {
