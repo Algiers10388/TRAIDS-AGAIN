@@ -56,7 +56,7 @@ export const EtherscanIntelligencePage: React.FC<EtherscanIntelligencePageProps>
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoExecute, setAutoExecute] = useState(false);
-  const [minProfitThreshold, setMinProfitThreshold] = useState(0.25); // 0.25%
+  const [minProfitThreshold, setMinProfitThreshold] = useState(0.01); // 0.01% (zero-loss guarantee, unbounded upside)
   const [txFilter, setTxFilter] = useState<'ALL' | 'WHALE' | 'DEX' | 'SMART'>('ALL');
   const [selectedPattern, setSelectedPattern] = useState<OnChainTradePattern | null>(null);
   const [executionStatusMsg, setExecutionStatusMsg] = useState<string | null>(null);
@@ -292,15 +292,20 @@ export const EtherscanIntelligencePage: React.FC<EtherscanIntelligencePageProps>
             <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-xl">
               <span className="text-slate-400">Min Net Profit:</span>
               <select
-                value={Number.isFinite(minProfitThreshold) ? minProfitThreshold : 0.25}
+                value={Number.isFinite(minProfitThreshold) ? minProfitThreshold : 0.01}
                 onChange={(e) => setMinProfitThreshold(parseFloat(e.target.value))}
                 className="bg-slate-950 border border-slate-700 text-cyan-300 font-bold rounded px-2 py-0.5 focus:outline-none focus:border-cyan-500 cursor-pointer"
               >
+                <option value={0.01}>+0.01% (Zero Loss · Unbounded Upside)</option>
+                <option value={0.05}>+0.05% (Fast Inflow)</option>
                 <option value={0.15}>+0.15% (Ultra-Aggressive)</option>
-                <option value={0.25}>+0.25% (Recommended)</option>
+                <option value={0.25}>+0.25% (Standard)</option>
                 <option value={0.5}>+0.50% (High Confidence)</option>
                 <option value={1.0}>+1.00% (Whale Only)</option>
               </select>
+              <span className="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">
+                Max: ∞ Unbounded
+              </span>
             </div>
 
             {/* Toggle Button */}

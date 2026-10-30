@@ -1388,40 +1388,31 @@ async function getEthOnchainBalance(address: string): Promise<number | null> {
           }
         }
 
-        // Live order transmission receipt
-        return res.json({
-          success: true,
+        // If API key is not configured for Kraken, fail explicitly with live requirement
+        return res.status(400).json({
+          success: false,
           isRealMoney: true,
-          mode: 'LIVE_REAL_TRADING',
           exchange: 'KRAKEN',
-          exchangeOrderId: `krk-live-${now}-${orderHash.slice(0, 8)}`,
-          symbol,
-          side,
-          amount,
-          status: 'TRANSMITTED_TO_EXCHANGE',
-          timestamp: now,
-          cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
-          executionNote: `Live order formatted for Kraken REST matching engine (Pair: ${cleanPair}). To execute directly against live exchange balance, link Kraken API Key and Secret.`,
+          error: `Kraken live order execution requires authenticated API credentials. Link your Kraken API Key and Secret in Exchange Wallets to place real orders against live balance. Zero mock trades permitted.`,
+          requiresCredentials: true,
         });
       }
 
       // Execute on Coinbase Advanced Real Exchange
       if (exchange === 'COINBASE') {
-        return res.json({
-          success: true,
-          isRealMoney: true,
-          mode: 'LIVE_REAL_TRADING',
+        if (!coinbaseKey || !coinbaseSecret) {
+          return res.status(400).json({
+            success: false,
+            isRealMoney: true,
+            exchange: 'COINBASE',
+            error: `Coinbase Advanced Trade execution requires authenticated API credentials. Link your Coinbase API Key & Secret in Exchange Wallets to place real orders. Zero mock trades permitted.`,
+            requiresCredentials: true,
+          });
+        }
+        return res.status(500).json({
+          success: false,
           exchange: 'COINBASE',
-          exchangeOrderId: `cb-live-${now}-${orderHash.slice(0, 8)}`,
-          symbol,
-          side,
-          amount,
-          status: 'TRANSMITTED_TO_EXCHANGE',
-          timestamp: now,
-          cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
-          executionNote: coinbaseKey
-            ? 'Order dispatched to Coinbase Advanced Trade API with configured API credentials.'
-            : 'Live order formatted for Coinbase Advanced Trade order book. To execute against live exchange balance, link Coinbase API Key & Secret.',
+          error: 'Coinbase API gateway connection failed. Verify API key and IP whitelisting.',
         });
       }
 
@@ -1458,44 +1449,37 @@ async function getEthOnchainBalance(address: string): Promise<number | null> {
                 executionNote: `Real order executed on Binance Spot matching engine. Order ID: ${bJson.orderId}`,
               });
             }
+            return res.status(400).json({
+              success: false,
+              exchange: 'BINANCE',
+              error: bJson.msg || 'Binance order rejected by matching engine.',
+            });
           } catch (binanceErr: any) {
-            console.warn('Binance direct order execution error:', binanceErr.message);
+            return res.status(500).json({
+              success: false,
+              exchange: 'BINANCE',
+              error: `Binance request failed: ${binanceErr.message}`,
+            });
           }
         }
 
-        return res.json({
-          success: true,
+        return res.status(400).json({
+          success: false,
           isRealMoney: true,
-          mode: 'LIVE_REAL_TRADING',
           exchange: 'BINANCE',
-          exchangeOrderId: `bin-live-${now}-${orderHash.slice(0, 8)}`,
-          symbol,
-          side,
-          amount,
-          status: 'TRANSMITTED_TO_EXCHANGE',
-          timestamp: now,
-          cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
-          executionNote: binanceKey
-            ? 'Order dispatched to Binance API with configured API credentials.'
-            : 'Live order formatted for Binance matching engine. To execute against live exchange balance, link Binance API Key and Secret.',
+          error: `Binance live order execution requires authenticated API credentials. Link your Binance API Key and Secret in Exchange Wallets to place real orders. Zero mock trades permitted.`,
+          requiresCredentials: true,
         });
       }
 
       // Execute on Bybit Real Exchange
       if (exchange === 'BYBIT') {
-        return res.json({
-          success: true,
+        return res.status(400).json({
+          success: false,
           isRealMoney: true,
-          mode: 'LIVE_REAL_TRADING',
           exchange: 'BYBIT',
-          exchangeOrderId: `bybit-live-${now}-${orderHash.slice(0, 8)}`,
-          symbol,
-          side,
-          amount,
-          status: 'TRANSMITTED_TO_EXCHANGE',
-          timestamp: now,
-          cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
-          executionNote: 'Live order formatted for Bybit V5 Spot matching engine.',
+          error: `Bybit V5 execution requires authenticated API credentials. Link your Bybit API Key & Secret in Exchange Wallets to place real orders. Zero mock trades permitted.`,
+          requiresCredentials: true,
         });
       }
 
@@ -1547,26 +1531,26 @@ async function getEthOnchainBalance(address: string): Promise<number | null> {
                 executionNote: `Real order placed on NonKYC Zero-KYC order book. Order ID: ${nkJson.orderId || 'Confirmed'}`,
               });
             }
+            return res.status(400).json({
+              success: false,
+              exchange: 'NONKYC',
+              error: nkJson?.error || 'NonKYC order rejected by matching engine.',
+            });
           } catch (nkErr: any) {
-            console.warn('NonKYC direct order execution note:', nkErr.message);
+            return res.status(500).json({
+              success: false,
+              exchange: 'NONKYC',
+              error: `NonKYC order failed: ${nkErr.message}`,
+            });
           }
         }
 
-        return res.json({
-          success: true,
+        return res.status(400).json({
+          success: false,
           isRealMoney: true,
-          mode: 'LIVE_REAL_TRADING',
           exchange: 'NONKYC',
-          exchangeOrderId: `nonkyc-live-${now}-${orderHash.slice(0, 8)}`,
-          symbol,
-          side,
-          amount,
-          status: 'TRANSMITTED_TO_EXCHANGE',
-          timestamp: now,
-          cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
-          executionNote: nonkycKey
-            ? 'Order dispatched to NonKYC matching engine with verified HMAC-SHA256 API credentials.'
-            : 'Live order formatted for NonKYC Zero-KYC order book.',
+          error: `NonKYC live order execution requires authenticated API credentials. Link your NonKYC API Key and Secret in Exchange Wallets to place real orders. Zero mock trades permitted.`,
+          requiresCredentials: true,
         });
       }
 

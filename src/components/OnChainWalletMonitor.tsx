@@ -42,6 +42,13 @@ import { PrivacyAssetProcessor } from './PrivacyAssetProcessor';
 
 const PRESET_WALLETS = [
   {
+    name: 'Cake Wallet (..5d)',
+    address: '0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d',
+    network: 'arbitrum' as const,
+    label: 'User Cake Wallet Profit Vault (..5d)',
+    icon: '🍰',
+  },
+  {
     name: 'Monero CCS Fund',
     address: '44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A',
     network: 'monero' as const,

@@ -666,7 +666,7 @@ INSTRUCTIONS:
     };
   }
 
-  public setAutoExecution(enabled: boolean, minThresholdPercent = 0.20) {
+  public setAutoExecution(enabled: boolean, minThresholdPercent = 0.01) {
     this.autoExecutionEnabled = enabled;
     this.minProfitThresholdPercent = minThresholdPercent;
     return { autoExecutionEnabled: this.autoExecutionEnabled, minProfitThresholdPercent: this.minProfitThresholdPercent };

@@ -3,7 +3,7 @@ export interface ArbTokenConfig {
   name: string;
   price: number;
   decimals: number;
-  category: 'Major' | 'LST / LRT' | 'Ecosystem' | 'Stablecoin';
+  category: 'Major' | 'LST / LRT' | 'Ecosystem' | 'DeFi' | 'Meme' | 'Stablecoin';
   defaultLoan: number;
   maxLoan: number;
   loanStep: number;
@@ -60,6 +60,21 @@ export const ARB_TOKENS: ArbTokenConfig[] = [
     typicalSpreadBps: 35,
     iconBg: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
     contractAddressArb: '0x2cccD1a60B4125b28F09A04561b36BE9079B0E84',
+  },
+  {
+    symbol: 'tBTC',
+    name: 'Threshold Network Bitcoin',
+    price: 65800,
+    decimals: 18,
+    category: 'Major',
+    defaultLoan: 2,
+    maxLoan: 25,
+    loanStep: 0.1,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 24,
+    iconBg: 'bg-amber-600/20 text-amber-300 border-amber-600/30',
+    contractAddressArb: '0x6c76971f144F743232483256B4856E3747c3453b',
   },
 
   // Liquid Staking & Restaking (LSTs / LRTs - Prime Spread Arbitrage)
@@ -200,6 +215,128 @@ export const ARB_TOKENS: ArbTokenConfig[] = [
     iconBg: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
     contractAddressArb: '0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a',
   },
+  {
+    symbol: 'MAGIC',
+    name: 'Treasure DAO Ecosystem',
+    price: 0.38,
+    decimals: 18,
+    category: 'Ecosystem',
+    defaultLoan: 50000,
+    maxLoan: 500000,
+    loanStep: 5000,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 45,
+    iconBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+    contractAddressArb: '0x539bdE0d7Dbd336b79148AA742883198BBF60342',
+  },
+  {
+    symbol: 'RDNT',
+    name: 'Radiant Capital',
+    price: 0.065,
+    decimals: 18,
+    category: 'Ecosystem',
+    defaultLoan: 150000,
+    maxLoan: 1500000,
+    loanStep: 25000,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 52,
+    iconBg: 'bg-cyan-600/20 text-cyan-300 border-cyan-600/30',
+    contractAddressArb: '0x3082CC23568eA640225c2467653dB90e9250AaA0',
+  },
+  {
+    symbol: 'AERO',
+    name: 'Aerodrome Finance (Base)',
+    price: 1.22,
+    decimals: 18,
+    category: 'Ecosystem',
+    defaultLoan: 25000,
+    maxLoan: 250000,
+    loanStep: 2500,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 38,
+    iconBg: 'bg-blue-600/20 text-blue-300 border-blue-600/30',
+    contractAddressArb: '0x940181a94A35A4569E4529A3CDfB74e48FD98AE3',
+  },
+  {
+    symbol: 'VELO',
+    name: 'Velodrome Finance (Optimism)',
+    price: 0.095,
+    decimals: 18,
+    category: 'Ecosystem',
+    defaultLoan: 200000,
+    maxLoan: 2000000,
+    loanStep: 20000,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 42,
+    iconBg: 'bg-red-500/20 text-red-300 border-red-500/30',
+    contractAddressArb: '0x9560e827aF36c94D2Ac33a39bCE1Fe78631088Db',
+  },
+
+  // DeFi Protocol Bluechips
+  {
+    symbol: 'PENDLE',
+    name: 'Pendle Yield Protocol',
+    price: 4.45,
+    decimals: 18,
+    category: 'DeFi',
+    defaultLoan: 10000,
+    maxLoan: 100000,
+    loanStep: 1000,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 34,
+    iconBg: 'bg-teal-600/20 text-teal-300 border-teal-600/30',
+    contractAddressArb: '0x0c880f670413da5450444c588998a6858b909e7f',
+  },
+  {
+    symbol: 'UNI',
+    name: 'Uniswap Governance Token',
+    price: 8.20,
+    decimals: 18,
+    category: 'DeFi',
+    defaultLoan: 6000,
+    maxLoan: 60000,
+    loanStep: 500,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 28,
+    iconBg: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+    contractAddressArb: '0xFa7F8980b0f1E64A2062791ce3b0e4Cd4960932d',
+  },
+  {
+    symbol: 'AAVE',
+    name: 'Aave Protocol Token',
+    price: 152.00,
+    decimals: 18,
+    category: 'DeFi',
+    defaultLoan: 350,
+    maxLoan: 3500,
+    loanStep: 50,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 26,
+    iconBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    contractAddressArb: '0xba5DdD1f9d7F570dc94a51479a000E3BCE967196',
+  },
+  {
+    symbol: 'LDO',
+    name: 'Lido DAO Governance Token',
+    price: 1.25,
+    decimals: 18,
+    category: 'DeFi',
+    defaultLoan: 35000,
+    maxLoan: 350000,
+    loanStep: 2500,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 32,
+    iconBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+    contractAddressArb: '0x13Ad51ed4F1B7e9b77187ea63f49cf899df2F95B',
+  },
 
   // Stablecoins (Sub-cent Peg Deviations & Yield Arbitrage)
   {
@@ -261,6 +398,98 @@ export const ARB_TOKENS: ArbTokenConfig[] = [
     typicalSpreadBps: 20,
     iconBg: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
     contractAddressArb: '0x4988a896b1227218e4A686fdE5EabdcAbd91571f',
+  },
+  {
+    symbol: 'FRAX',
+    name: 'Frax Finance Stablecoin',
+    price: 1.00,
+    decimals: 18,
+    category: 'Stablecoin',
+    defaultLoan: 50000,
+    maxLoan: 600000,
+    loanStep: 5000,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 16,
+    iconBg: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+    contractAddressArb: '0x17FC002b466eEc40DaE837Fc4bE5c67993ddBd6F',
+  },
+  {
+    symbol: 'USDe',
+    name: 'Ethena Synthetic Dollar',
+    price: 1.00,
+    decimals: 18,
+    category: 'Stablecoin',
+    defaultLoan: 60000,
+    maxLoan: 800000,
+    loanStep: 10000,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 18,
+    iconBg: 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30',
+    contractAddressArb: '0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34',
+  },
+  {
+    symbol: 'sUSDe',
+    name: 'Ethena Staked USDe',
+    price: 1.10,
+    decimals: 18,
+    category: 'Stablecoin',
+    defaultLoan: 45000,
+    maxLoan: 500000,
+    loanStep: 5000,
+    aaveAvailable: true,
+    balancerAvailable: true,
+    typicalSpreadBps: 22,
+    iconBg: 'bg-indigo-600/20 text-indigo-300 border-indigo-600/30',
+    contractAddressArb: '0x211Cc4DD073734dA055fbF44a2b4667d5E5fE5d2',
+  },
+  {
+    symbol: 'SPA',
+    name: 'Sperax USD Stablecoin',
+    price: 1.00,
+    decimals: 18,
+    category: 'Stablecoin',
+    defaultLoan: 40000,
+    maxLoan: 400000,
+    loanStep: 5000,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 25,
+    iconBg: 'bg-pink-600/20 text-pink-300 border-pink-600/30',
+    contractAddressArb: '0x5575552988A977950c0617da99e6367576d592BA',
+  },
+
+  // High-Volatility Memes
+  {
+    symbol: 'PEPE',
+    name: 'Pepe Token',
+    price: 0.0000095,
+    decimals: 18,
+    category: 'Meme',
+    defaultLoan: 4000000000,
+    maxLoan: 50000000000,
+    loanStep: 500000000,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 65,
+    iconBg: 'bg-emerald-600/20 text-emerald-300 border-emerald-600/30',
+    contractAddressArb: '0x25d887Ce7a35172C62FeBFD67a1856620DAeb000',
+  },
+  {
+    symbol: 'SHIB',
+    name: 'Shiba Inu',
+    price: 0.000018,
+    decimals: 18,
+    category: 'Meme',
+    defaultLoan: 2000000000,
+    maxLoan: 30000000000,
+    loanStep: 250000000,
+    aaveAvailable: false,
+    balancerAvailable: true,
+    typicalSpreadBps: 58,
+    iconBg: 'bg-amber-600/20 text-amber-300 border-amber-600/30',
+    contractAddressArb: '0xfabA6f8e4a5E8Ab82F62fe7C39859FA577269BE3',
   },
 ];
 
@@ -1126,7 +1355,8 @@ prefer_zero_fee_balancer = true
 max_gas_per_tx = 350000
 
 [risk]
-min_net_profit_usd = 6.00
+min_net_profit_usd = 0.01
+max_profit_cap = "unbounded" # No max ceiling, sweeps 100% of realized alpha
 daily_revert_loss_cap_usd = 75.00
 consecutive_failure_limit = 3
 dry_run = false
@@ -1164,7 +1394,8 @@ prefer_zero_fee_balancer = true
 max_gas_per_tx = 300000
 
 [risk]
-min_net_profit_usd = 5.00
+min_net_profit_usd = 0.01
+max_profit_cap = "unbounded" # No max ceiling, sweeps 100% of realized alpha
 daily_revert_loss_cap_usd = 60.00
 dry_run = false
 
@@ -1201,7 +1432,8 @@ prefer_zero_fee_balancer = true
 max_gas_per_tx = 320000
 
 [risk]
-min_net_profit_usd = 5.50
+min_net_profit_usd = 0.01
+max_profit_cap = "unbounded" # No max ceiling, sweeps 100% of realized alpha
 daily_revert_loss_cap_usd = 60.00
 dry_run = false
 

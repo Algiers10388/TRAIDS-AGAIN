@@ -47,6 +47,7 @@ interface HeaderProps {
   onChainSignalsCount?: number;
   onOpenOkxWallet?: () => void;
   okxConnectedAddress?: string | null;
+  onOpenCakeWallet?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -63,6 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAiTroubleshooter,
   onOpenOkxWallet,
   okxConnectedAddress,
+  onOpenCakeWallet,
   fiatAccountAvailableBalance,
   activePositionsCount,
   tradingMode,
@@ -189,6 +191,20 @@ export const Header: React.FC<HeaderProps> = ({
 
           <span className="text-slate-700">·</span>
 
+          {/* Connected Vault: Cake Wallet ..5d */}
+          <button
+            type="button"
+            onClick={onOpenCakeWallet}
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold cursor-pointer transition-colors"
+            title="Click to view Cake Wallet (0xc102...f15d) WalletConnect pairing & live balance"
+          >
+            <span className="text-[10px]">🍰</span>
+            <span>Cake ..5d</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          </button>
+
+          <span className="text-slate-700">·</span>
+
           {/* Live Execution Mode Badge - 100% Real Infrastructure */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-500/50 text-rose-300 font-bold text-[10px] tracking-wide shadow-sm shadow-rose-950/40">
             <span className="relative flex h-2 w-2">
@@ -247,8 +263,30 @@ export const Header: React.FC<HeaderProps> = ({
             title="Manage Connected Exchange Wallets (Binance, Kraken, Coinbase, Bybit, NonKYC)"
           >
             <Wallet className="h-3.5 w-3.5 text-cyan-400" />
-            <span className="hidden xl:inline text-[11px]">Wallets</span>
+            <span className="hidden xl:inline text-[11px]">Exchanges</span>
           </button>
+
+          {/* OKX Web3 Wallet Direct Button */}
+          {onOpenOkxWallet && (
+            <button
+              onClick={onOpenOkxWallet}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono transition-all cursor-pointer ${
+                okxConnectedAddress
+                  ? 'bg-neutral-900 border-white/40 text-white hover:border-white shadow-sm'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title={okxConnectedAddress ? `Connected OKX Wallet: ${okxConnectedAddress}` : 'Connect OKX Web3 Wallet (..11)'}
+            >
+              <div className="w-3 h-3 rounded-[2px] bg-black border border-white/40 grid grid-cols-2 gap-0.5 p-0.5 shrink-0">
+                <div className="bg-white rounded-[0.5px]" />
+                <div className="bg-black" />
+              </div>
+              <span className="hidden sm:inline text-[11px] font-bold">
+                {okxConnectedAddress ? `OKX ${okxConnectedAddress.toLowerCase().endsWith('11') ? '(..11)' : `(${okxConnectedAddress.slice(0, 4)}..${okxConnectedAddress.slice(-2)})`}` : 'OKX ..11'}
+              </span>
+              <span className={`h-1.5 w-1.5 rounded-full ${okxConnectedAddress ? 'bg-cyan-400' : 'bg-amber-400 animate-pulse'}`} />
+            </button>
+          )}
 
           {/* AI Copilot Button */}
           {onOpenAiTroubleshooter && (
@@ -319,6 +357,19 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>Withdraw Capital</span>
                   </button>
 
+                  {onOpenCakeWallet && (
+                    <button
+                      onClick={() => {
+                        setShowToolsMenu(false);
+                        onOpenCakeWallet();
+                      }}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors w-full text-left cursor-pointer"
+                    >
+                      <span className="text-xs">🍰</span>
+                      <span>Cake Wallet (WalletConnect)</span>
+                    </button>
+                  )}
+
                   {onOpenOkxWallet && (
                     <button
                       onClick={() => {
@@ -331,7 +382,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <span>
                         {okxConnectedAddress
                           ? `OKX: ${okxConnectedAddress.slice(0, 6)}...`
-                          : 'Connect OKX Wallet'}
+                          : 'Connect OKX Wallet (..11)'}
                       </span>
                     </button>
                   )}

@@ -41,6 +41,7 @@ import { CorrelationMatrixView } from './components/CorrelationMatrixView';
 import { AiTroubleshooterModal } from './components/AiTroubleshooterModal';
 import { OnChainWalletMonitor } from './components/OnChainWalletMonitor';
 import { OkxWalletModal } from './components/OkxWalletModal';
+import { CakeWalletConnectModal } from './components/CakeWalletConnectModal';
 import { getCachedOkxAddress } from './services/okxWallet';
 import {
   generateInitialCandles,
@@ -155,6 +156,7 @@ export default function App() {
 
   // OKX Web3 Wallet & Exchange Integration State
   const [okxWalletModalOpen, setOkxWalletModalOpen] = useState<boolean>(false);
+  const [cakeWalletModalOpen, setCakeWalletModalOpen] = useState<boolean>(false);
   const [okxConnectedAddress, setOkxConnectedAddress] = useState<string | null>(getCachedOkxAddress());
   const [targetMonitorWallet, setTargetMonitorWallet] = useState<{ address: string; network: string } | null>(null);
 
@@ -1795,6 +1797,7 @@ export default function App() {
         onChainSignalsCount={onChainSignalsCount}
         onOpenOkxWallet={() => setOkxWalletModalOpen(true)}
         okxConnectedAddress={okxConnectedAddress}
+        onOpenCakeWallet={() => setCakeWalletModalOpen(true)}
       />
 
       {/* Educational Risk Guidance Banner */}
@@ -1818,6 +1821,7 @@ export default function App() {
             availableAssets={assets}
             okxConnectedAddress={okxConnectedAddress}
             onOpenOkxWallet={() => setOkxWalletModalOpen(true)}
+            onOpenCakeWallet={() => setCakeWalletModalOpen(true)}
             onArbitrageExecuted={handleFlashArbExecuted}
           />
         </main>
@@ -2041,6 +2045,14 @@ export default function App() {
         onClose={() => setOkxWalletModalOpen(false)}
         onSelectAddressForMonitor={handleSelectAddressForMonitor}
         onDepositToDesk={handleDepositFromOkx}
+      />
+
+      {/* Cake Wallet (WalletConnect v2) Modal */}
+      <CakeWalletConnectModal
+        isOpen={cakeWalletModalOpen}
+        onClose={() => setCakeWalletModalOpen(false)}
+        cakeAddress="0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d"
+        onSelectAddressForMonitor={handleSelectAddressForMonitor}
       />
     </div>
   );
