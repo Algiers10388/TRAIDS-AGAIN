@@ -147,6 +147,24 @@ export async function linkDebitCard(
   return safeParseJson(res, 'Failed to link debit card');
 }
 
+export async function removeBankAccount(
+  bankId: string
+): Promise<{ success: boolean; account: FiatAccount; message: string }> {
+  const res = await fetch(`/api/fiat/bank/${bankId}`, {
+    method: 'DELETE',
+  });
+  return safeParseJson(res, 'Failed to remove bank account');
+}
+
+export async function removeDebitCard(
+  cardId: string
+): Promise<{ success: boolean; account: FiatAccount; message: string }> {
+  const res = await fetch(`/api/fiat/card/${cardId}`, {
+    method: 'DELETE',
+  });
+  return safeParseJson(res, 'Failed to remove card');
+}
+
 export async function transferBetweenFiatAndBot(
   direction: 'TO_BOT' | 'FROM_BOT',
   amount: number

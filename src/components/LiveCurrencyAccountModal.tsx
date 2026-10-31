@@ -26,6 +26,7 @@ import {
   Search,
   ArrowUpDown,
   RotateCw,
+  Trash2,
 } from 'lucide-react';
 import {
   FiatAccount,
@@ -38,6 +39,8 @@ import {
   depositViaBank,
   linkBankAccount,
   linkDebitCard,
+  removeBankAccount,
+  removeDebitCard,
   transferBetweenFiatAndBot,
   withdrawToBank,
   withdrawFunds,
@@ -71,7 +74,6 @@ interface LiveCurrencyAccountModalProps {
 }
 
 const POPULAR_BANKS = [
-  { name: 'JPMorgan Chase', routing: '021000021' },
   { name: 'Bank of America', routing: '121000358' },
   { name: 'Wells Fargo', routing: '121000248' },
   { name: 'Citibank', routing: '021000089' },
@@ -86,6 +88,7 @@ const POPULAR_BANKS = [
   { name: 'Discover Bank', routing: '031100649' },
   { name: 'Truist Bank', routing: '061000104' },
   { name: 'Huntington Bank', routing: '044000024' },
+  { name: 'JPMorgan Chase', routing: '021000021' },
   { name: 'Goldman Sachs Marcus', routing: '021000089' },
 ];
 
@@ -159,8 +162,8 @@ export const LiveCurrencyAccountModal: React.FC<LiveCurrencyAccountModalProps> =
   const [bankDepositAmount, setBankDepositAmount] = useState<string>('');
   const [transferSpeed, setTransferSpeed] = useState<'INSTANT_FEDNOW' | 'STANDARD_ACH'>('INSTANT_FEDNOW');
   const [showConnectBankForm, setShowConnectBankForm] = useState<boolean>(false);
-  const [newBankName, setNewBankName] = useState<string>('JPMorgan Chase');
-  const [newRoutingNumber, setNewRoutingNumber] = useState<string>('021000021');
+  const [newBankName, setNewBankName] = useState<string>('');
+  const [newRoutingNumber, setNewRoutingNumber] = useState<string>('');
   const [newAccountNumber, setNewAccountNumber] = useState<string>('');
   const [newAccountType, setNewAccountType] = useState<'CHECKING' | 'SAVINGS'>('CHECKING');
   const [newAccountHolder, setNewAccountHolder] = useState<string>(fiatAccount.accountHolder || 'Authorized Trader');
@@ -271,19 +274,25 @@ This document certifies real-time clearing across banking rails.
         if (showNewBankInFund || !bId || fiatAccount.linkedBanks.length === 0) {
           let cleanRouting = newRoutingNumber.replace(/\D/g, '');
           let cleanAccount = newAccountNumber.replace(/\D/g, '');
+          if (!newBankName || newBankName.trim().length < 2) {
+            throw new Error('Please enter your bank or financial institution name.');
+          }
           if (cleanRouting.length !== 9) {
             const match = POPULAR_BANKS.find(
-              (b) => b.name.toLowerCase() === (newBankName || '').trim().toLowerCase()
+              (b) => b.name.toLowerCase() === newBankName.trim().toLowerCase()
             );
-            cleanRouting = match ? match.routing : '021000021';
-            setNewRoutingNumber(cleanRouting);
+            if (match) {
+              cleanRouting = match.routing;
+              setNewRoutingNumber(cleanRouting);
+            } else {
+              throw new Error('Please enter a valid 9-digit ABA routing number.');
+            }
           }
           if (cleanAccount.length < 4) {
-            cleanAccount = String(Math.floor(100000000 + Math.random() * 900000000));
-            setNewAccountNumber(cleanAccount);
+            throw new Error('Please enter your account number (at least 4 digits).');
           }
           newB = {
-            bankName: (newBankName || 'JPMorgan Chase').trim(),
+            bankName: newBankName.trim(),
             routingNumber: cleanRouting,
             accountNumber: cleanAccount,
             accountType: newAccountType,
@@ -449,7 +458,11 @@ This document certifies real-time clearing across banking rails.
     let cleanRouting = newRoutingNumber.replace(/\D/g, '');
     let cleanAccount = newAccountNumber.replace(/\D/g, '');
 
-    // Fallback: If routing is missing or incomplete, match from known bank or default to Chase FedNow
+    if (!newBankName || newBankName.trim().length < 2) {
+      showFeedback('error', 'Please enter your bank or financial institution name.');
+      return;
+    }
+
     if (cleanRouting.length !== 9) {
       const match = POPULAR_BANKS.find(
         (b) => b.name.toLowerCase() === newBankName.trim().toLowerCase()
@@ -458,19 +471,13 @@ This document certifies real-time clearing across banking rails.
         cleanRouting = match.routing;
         setNewRoutingNumber(cleanRouting);
       } else {
-        cleanRouting = '021000021';
-        setNewRoutingNumber('021000021');
+        showFeedback('error', 'Please enter a valid 9-digit ABA routing number.');
+        return;
       }
     }
 
-    // Fallback: If account number is less than 4 digits, auto-generate a valid checking account number
     if (cleanAccount.length < 4) {
-      cleanAccount = String(Math.floor(100000000 + Math.random() * 900000000));
-      setNewAccountNumber(cleanAccount);
-    }
-
-    if (!newBankName || newBankName.trim().length < 2) {
-      showFeedback('error', 'Please enter a valid financial institution name.');
+      showFeedback('error', 'Please enter your account number (at least 4 digits).');
       return;
     }
 
@@ -501,21 +508,26 @@ This document certifies real-time clearing across banking rails.
     let cleanRouting = inlineRouting.replace(/\D/g, '');
     let cleanAcc = inlineAccountNum.replace(/\D/g, '');
 
+    if (!inlineBankName || inlineBankName.trim().length < 2) {
+      showFeedback('error', 'Please enter your bank or financial institution name.');
+      return;
+    }
+
     if (cleanRouting.length !== 9) {
       const match = POPULAR_BANKS.find(
         (b) => b.name.toLowerCase() === inlineBankName.trim().toLowerCase()
       );
-      cleanRouting = match ? match.routing : '021000021';
-      setInlineRouting(cleanRouting);
+      if (match) {
+        cleanRouting = match.routing;
+        setInlineRouting(cleanRouting);
+      } else {
+        showFeedback('error', 'Please enter a valid 9-digit ABA routing number.');
+        return;
+      }
     }
 
     if (cleanAcc.length < 4) {
-      cleanAcc = String(Math.floor(100000000 + Math.random() * 900000000));
-      setInlineAccountNum(cleanAcc);
-    }
-
-    if (!inlineBankName || inlineBankName.trim().length < 2) {
-      showFeedback('error', 'Please enter a valid financial institution name.');
+      showFeedback('error', 'Please enter your account number (at least 4 digits).');
       return;
     }
 
@@ -608,6 +620,46 @@ This document certifies real-time clearing across banking rails.
       showFeedback('success', `Debit card ending in ${res.card.last4} saved and selected for instant push withdrawal!`);
     } catch (err: any) {
       showFeedback('error', err.message || 'Failed to save debit card.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 3e. Remove a Linked Bank Account
+  const handleRemoveBank = async (bankId: string, bankName: string) => {
+    setIsLoading(true);
+    try {
+      const res = await removeBankAccount(bankId);
+      onAccountUpdated(res.account, res.message);
+      if (selectedBankId === bankId) {
+        setSelectedBankId(res.account.linkedBanks[0]?.id || '');
+      }
+      if (withdrawBankId === bankId) {
+        setWithdrawBankId(res.account.linkedBanks[0]?.id || '');
+      }
+      showFeedback('success', res.message || `Disconnected ${bankName}.`);
+    } catch (err: any) {
+      showFeedback('error', err.message || 'Failed to remove bank account.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 3f. Remove a Linked Debit Card
+  const handleRemoveCard = async (cardId: string, brand: string, last4: string) => {
+    setIsLoading(true);
+    try {
+      const res = await removeDebitCard(cardId);
+      onAccountUpdated(res.account, res.message);
+      if (selectedCardId === cardId) {
+        setSelectedCardId(res.account.linkedCards[0]?.id || 'NEW');
+      }
+      if (withdrawCardId === cardId) {
+        setWithdrawCardId(res.account.linkedCards[0]?.id || '');
+      }
+      showFeedback('success', res.message || `Disconnected ${brand} •••• ${last4}.`);
+    } catch (err: any) {
+      showFeedback('error', err.message || 'Failed to remove debit card.');
     } finally {
       setIsLoading(false);
     }
@@ -1273,9 +1325,22 @@ This document certifies real-time clearing across banking rails.
                                     <Building2 className="h-4 w-4 text-emerald-400" />
                                     <span className="text-xs font-bold text-white">{bank.bankName}</span>
                                   </div>
-                                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
-                                    {bank.status}
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                                      {bank.status}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveBank(bank.id, bank.bankName);
+                                      }}
+                                      className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                                      title="Disconnect and remove bank account"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="text-[11px] text-slate-400 mt-1 font-mono flex items-center justify-between">
                                   <span>{bank.accountType}: {bank.accountNumberMasked}</span>
@@ -1319,9 +1384,6 @@ This document certifies real-time clearing across banking rails.
                                   onClick={() => {
                                     setNewBankName(p.name);
                                     setNewRoutingNumber(p.routing);
-                                    if (!newAccountNumber || newAccountNumber.length < 4) {
-                                      setNewAccountNumber(String(Math.floor(100000000 + Math.random() * 900000000)));
-                                    }
                                   }}
                                   className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border cursor-pointer transition-all ${
                                     newBankName === p.name
@@ -1344,7 +1406,7 @@ This document certifies real-time clearing across banking rails.
                                 type="text"
                                 value={newBankName}
                                 onChange={(e) => setNewBankName(e.target.value)}
-                                placeholder="e.g. JPMorgan Chase"
+                                placeholder="e.g. Bank of America, Wells Fargo, Navy Federal"
                                 className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
                                 required
                               />
@@ -1355,20 +1417,16 @@ This document certifies real-time clearing across banking rails.
                                 <label className="block text-[10px] font-bold text-slate-400 uppercase">
                                   9-Digit ABA Routing #
                                 </label>
-                                <button
-                                  type="button"
-                                  onClick={() => setNewRoutingNumber('021000021')}
-                                  className="text-[10px] text-cyan-400 hover:text-cyan-300 cursor-pointer"
-                                >
-                                  Use FedNow ABA
-                                </button>
+                                {newRoutingNumber.length === 9 && (
+                                  <span className="text-[10px] text-emerald-400 font-mono">Valid 9-Digit ABA</span>
+                                )}
                               </div>
                               <input
                                 type="text"
                                 maxLength={9}
                                 value={newRoutingNumber}
                                 onChange={(e) => setNewRoutingNumber(e.target.value.replace(/\D/g, ''))}
-                                placeholder="021000021"
+                                placeholder="e.g. 121000358"
                                 className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 tracking-wider"
                                 required
                               />
@@ -1419,6 +1477,19 @@ This document certifies real-time clearing across banking rails.
                                 </label>
                               </div>
                             </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                            <span className="text-[11px] text-slate-400">Want to connect this bank without depositing right now?</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleLinkBank(e)}
+                              disabled={isLoading || !newBankName || newRoutingNumber.length !== 9 || newAccountNumber.length < 4}
+                              className="px-3.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold text-xs cursor-pointer transition-all disabled:opacity-40 flex items-center gap-1.5"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>+ Connect & Save Bank Account</span>
+                            </button>
                           </div>
                         </div>
                       )}
@@ -1503,9 +1574,22 @@ This document certifies real-time clearing across banking rails.
                                     <CreditCard className="h-4 w-4 text-cyan-400" />
                                     <span className="text-xs font-bold text-white">{card.brand} Check Card</span>
                                   </div>
-                                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
-                                    •••• {card.last4}
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
+                                      •••• {card.last4}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveCard(card.id, card.brand, card.last4);
+                                      }}
+                                      className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                                      title="Disconnect and remove debit card"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="text-[11px] text-slate-400 mt-1 font-mono flex items-center justify-between">
                                   <span>{card.cardholderName}</span>
@@ -1629,6 +1713,19 @@ This document certifies real-time clearing across banking rails.
                             />
                             <span>Save check card to account for fast future funding & instant withdrawals</span>
                           </label>
+
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                            <span className="text-[11px] text-slate-400">Want to link this card without depositing right now?</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleLinkDebitCardStandalone(e)}
+                              disabled={isLoading || newCardNumber.replace(/\D/g, '').length < 15 || newCardCvc.replace(/\D/g, '').length < 3}
+                              className="px-3.5 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 font-bold text-xs cursor-pointer transition-all disabled:opacity-40 flex items-center gap-1.5"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>+ Tokenize & Save Debit Card</span>
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1822,9 +1919,6 @@ This document certifies real-time clearing across banking rails.
                           onClick={() => {
                             setNewBankName(p.name);
                             setNewRoutingNumber(p.routing);
-                            if (!newAccountNumber || newAccountNumber.length < 4) {
-                              setNewAccountNumber(String(Math.floor(100000000 + Math.random() * 900000000)));
-                            }
                           }}
                           className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
                             isSelected
@@ -1856,7 +1950,7 @@ This document certifies real-time clearing across banking rails.
                         type="text"
                         value={newBankName}
                         onChange={(e) => setNewBankName(e.target.value)}
-                        placeholder="e.g. JPMorgan Chase or Navy Federal"
+                        placeholder="e.g. Bank of America, Wells Fargo, Navy Federal"
                         className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-cyan-500"
                         required
                       />
@@ -1870,7 +1964,7 @@ This document certifies real-time clearing across banking rails.
                         type="text"
                         value={newAccountHolder}
                         onChange={(e) => setNewAccountHolder(e.target.value)}
-                        placeholder="e.g. Alex Morgan"
+                        placeholder="e.g. John Doe (Account Legal Name)"
                         className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-cyan-500"
                         required
                       />
@@ -1886,7 +1980,7 @@ This document certifies real-time clearing across banking rails.
                           maxLength={9}
                           value={newRoutingNumber}
                           onChange={(e) => setNewRoutingNumber(e.target.value.replace(/\D/g, ''))}
-                          placeholder="021000021"
+                          placeholder="e.g. 121000358"
                           className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-mono rounded-xl px-4 py-2.5 focus:outline-none focus:border-cyan-500 tracking-wider"
                           required
                         />
@@ -2024,17 +2118,27 @@ This document certifies real-time clearing across banking rails.
                             </div>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setWithdrawBankId(bank.id);
-                            setWithdrawDestinationType('BANK');
-                            setActiveTab('WITHDRAW');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 border border-slate-700 cursor-pointer transition-all"
-                        >
-                          Withdraw To This
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWithdrawBankId(bank.id);
+                              setWithdrawDestinationType('BANK');
+                              setActiveTab('WITHDRAW');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 border border-slate-700 cursor-pointer transition-all"
+                          >
+                            Withdraw
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBank(bank.id, bank.bankName)}
+                            className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 cursor-pointer transition-all"
+                            title="Disconnect and purge bank credentials"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2199,7 +2303,7 @@ This document certifies real-time clearing across banking rails.
                           type="text"
                           value={newCardHolder}
                           onChange={(e) => setNewCardHolder(e.target.value)}
-                          placeholder="e.g. Alex Morgan"
+                          placeholder="e.g. John Doe (Cardholder Legal Name)"
                           className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-cyan-500"
                           required
                         />
@@ -2324,17 +2428,27 @@ This document certifies real-time clearing across banking rails.
                             </div>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setWithdrawCardId(card.id);
-                            setWithdrawDestinationType('CARD');
-                            setActiveTab('WITHDRAW');
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 border border-slate-700 cursor-pointer transition-all"
-                        >
-                          Withdraw To This
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWithdrawCardId(card.id);
+                              setWithdrawDestinationType('CARD');
+                              setActiveTab('WITHDRAW');
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-cyan-300 border border-slate-700 cursor-pointer transition-all"
+                          >
+                            Withdraw
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCard(card.id, card.brand, card.last4)}
+                            className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 cursor-pointer transition-all"
+                            title="Disconnect and remove debit card"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -2774,9 +2888,6 @@ This document certifies real-time clearing across banking rails.
                           onClick={() => {
                             setNewBankName(p.name);
                             setNewRoutingNumber(p.routing);
-                            if (!newAccountNumber || newAccountNumber.length < 4) {
-                              setNewAccountNumber(String(Math.floor(100000000 + Math.random() * 900000000)));
-                            }
                           }}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border cursor-pointer transition-all ${
                             newBankName === p.name
@@ -2797,7 +2908,7 @@ This document certifies real-time clearing across banking rails.
                         type="text"
                         value={newBankName}
                         onChange={(e) => setNewBankName(e.target.value)}
-                        placeholder="e.g. JPMorgan Chase or Local Credit Union"
+                        placeholder="e.g. Bank of America, Wells Fargo, Credit Union"
                         className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500"
                         required
                       />
@@ -2821,7 +2932,7 @@ This document certifies real-time clearing across banking rails.
                         maxLength={9}
                         value={newRoutingNumber}
                         onChange={(e) => setNewRoutingNumber(e.target.value)}
-                        placeholder="021000021"
+                        placeholder="e.g. 121000358"
                         className="w-full bg-slate-900 border border-slate-700 text-white text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500"
                         required
                       />
@@ -3346,9 +3457,6 @@ This document certifies real-time clearing across banking rails.
                                     onClick={() => {
                                       setInlineBankName(b.name);
                                       setInlineRouting(b.routing);
-                                      if (!inlineAccountNum || inlineAccountNum.length < 4) {
-                                        setInlineAccountNum(String(Math.floor(100000000 + Math.random() * 900000000)));
-                                      }
                                     }}
                                     className="text-xs px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition-all font-medium flex items-center gap-1.5 cursor-pointer"
                                   >
@@ -3366,7 +3474,7 @@ This document certifies real-time clearing across banking rails.
                                   type="text"
                                   value={inlineBankName}
                                   onChange={(e) => setInlineBankName(e.target.value)}
-                                  placeholder="e.g. JPMorgan Chase or Wells Fargo"
+                                  placeholder="e.g. Bank of America, Wells Fargo, Navy Federal"
                                   className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-cyan-500"
                                 />
                               </div>
@@ -3377,7 +3485,7 @@ This document certifies real-time clearing across banking rails.
                                   maxLength={9}
                                   value={inlineRouting}
                                   onChange={(e) => setInlineRouting(e.target.value.replace(/\D/g, ''))}
-                                  placeholder="021000021"
+                                  placeholder="e.g. 121000358"
                                   className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-cyan-500 tracking-wider"
                                 />
                               </div>

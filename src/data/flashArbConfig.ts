@@ -1293,7 +1293,7 @@ pub async fn execute_or_dry_run(&self, opp: &ArbitrageOpportunity, sim: &Simulat
 
     // 1. Resolve Profit Vault: 100% of realized alpha routed directly
     let recipient = std::env::var("FLASH_ARB_PROFIT_WALLET")
-        .unwrap_or_else(|_| "0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d".to_string())
+        .unwrap_or_else(|_| "0x65602eb9e09b07002872e074004400d37e27ccb9".to_string())
         .parse::<Address>()?;
 
     // 2. Encode Real ABI Calldata for FlashArbOptimized.executeBalancerFlashArb
@@ -1362,8 +1362,8 @@ consecutive_failure_limit = 3
 dry_run = false
 
 [beneficiary]
-profit_recipient_address = "0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d"
-label = "Main Arb Profit Vault"
+profit_recipient_address = "0x65602eb9e09b07002872e074004400d37e27ccb9"
+label = "MetaMask Profit Vault"
 auto_sweep = true
 
 [signer]
@@ -1400,8 +1400,8 @@ daily_revert_loss_cap_usd = 60.00
 dry_run = false
 
 [beneficiary]
-profit_recipient_address = "0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d"
-label = "Main Arb Profit Vault"
+profit_recipient_address = "0x65602eb9e09b07002872e074004400d37e27ccb9"
+label = "MetaMask Profit Vault"
 auto_sweep = true
 
 [signer]
@@ -1438,8 +1438,8 @@ daily_revert_loss_cap_usd = 60.00
 dry_run = false
 
 [beneficiary]
-profit_recipient_address = "0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d"
-label = "Main Arb Profit Vault"
+profit_recipient_address = "0x65602eb9e09b07002872e074004400d37e27ccb9"
+label = "MetaMask Profit Vault"
 auto_sweep = true
 
 [signer]

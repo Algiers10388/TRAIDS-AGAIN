@@ -26,39 +26,8 @@ let fiatAccount: FiatAccount = {
   twoFactorEnabled: true,
   vaultEncryption: "AES_256_GCM",
   fdicCustodyInsured: true,
-  linkedBanks: [
-    {
-      id: "bnk-default-chase",
-      bankName: "JPMorgan Chase Bank",
-      accountType: "CHECKING",
-      routingNumber: "•••• 0021",
-      accountNumberMasked: "•••• 8821",
-      accountHolderName: "Live Trading Account",
-      status: "VERIFIED",
-      isDefault: true,
-      currency: "USD",
-      connectedVia: "PLAID_OPEN_BANKING",
-      addedAt: Date.now() - 86400000,
-      tokenizedId: "tok_ach_chase_8821_fips140",
-      isAbaChecksumVerified: true,
-      hsmKeyFingerprint: "HSM-FIPS140-2-CHASE-0021",
-    },
-  ],
-  linkedCards: [
-    {
-      id: "crd-default-visa",
-      brand: "VISA",
-      last4: "4242",
-      expMonth: 12,
-      expYear: 2029,
-      cardholderName: "Live Trading Account",
-      isDefault: true,
-      tokenizedId: "tok_debit_visa_4242_pci",
-      issuerCountry: "US",
-      supportInstantPayout: true,
-      addedAt: Date.now() - 86400000,
-    },
-  ],
+  linkedBanks: [],
+  linkedCards: [],
 };
 
 let botSecuritySettings: BotSecuritySettings = {
@@ -768,6 +737,44 @@ export function setupFiatRoutes(app: express.Application) {
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message || "Failed to link debit card" });
+    }
+  });
+
+  // 5b. Remove a Linked Bank Account (Permits clean removal of test or discontinued accounts)
+  app.delete("/api/fiat/bank/:id", (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const index = fiatAccount.linkedBanks.findIndex((b) => b.id === id);
+      if (index === -1) {
+        return res.status(404).json({ success: false, error: "Bank account not found" });
+      }
+      const removed = fiatAccount.linkedBanks.splice(index, 1)[0];
+      return res.json({
+        success: true,
+        message: `Successfully disconnected ${removed.bankName} (${removed.accountNumberMasked}) and purged tokenized credentials.`,
+        account: fiatAccount,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message || "Failed to remove bank account" });
+    }
+  });
+
+  // 5c. Remove a Linked Debit Card
+  app.delete("/api/fiat/card/:id", (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const index = fiatAccount.linkedCards.findIndex((c) => c.id === id);
+      if (index === -1) {
+        return res.status(404).json({ success: false, error: "Debit card not found" });
+      }
+      const removed = fiatAccount.linkedCards.splice(index, 1)[0];
+      return res.json({
+        success: true,
+        message: `Successfully disconnected ${removed.brand} debit card (•••• ${removed.last4}) and purged token.`,
+        account: fiatAccount,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message || "Failed to remove card" });
     }
   });
 

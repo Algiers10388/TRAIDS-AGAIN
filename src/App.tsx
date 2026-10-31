@@ -1848,10 +1848,10 @@ export default function App() {
         <LiveCurrencyTreasuryCard
           fiatAccount={fiatAccount}
           onOpenModal={() => handleOpenFiatModal('FUND_BOT')}
-          onOpenDebitLoad={() => handleOpenFiatModal('DEBIT_CARD')}
-          onOpenBankConnect={() => handleOpenFiatModal('BANK_TRANSFER')}
+          onOpenDebitLoad={() => handleOpenFiatModal('ADD_CARD')}
+          onOpenBankConnect={() => handleOpenFiatModal('ADD_BANK')}
           onOpenWithdraw={() => handleOpenFiatModal('WITHDRAW')}
-          onOpenFundBot={(method) => handleOpenFiatModal(method === 'CARD' ? 'DEBIT_CARD' : 'BANK_TRANSFER')}
+          onOpenFundBot={(method) => handleOpenFiatModal(method === 'CARD' ? 'ADD_CARD' : 'ADD_BANK')}
           onOpenCashCheck={() => handleOpenFiatModal('CASH_CHECK')}
           onOpenSecurity={() => handleOpenFiatModal('SECURITY')}
         />

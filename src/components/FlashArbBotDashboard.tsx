@@ -227,7 +227,7 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
   const [liveExecutionError, setLiveExecutionError] = useState<string | null>(null);
 
   // Treasury & Execution Architecture Configuration
-  const defaultProfitWallet = '0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d';
+  const defaultProfitWallet = '0x65602eb9e09b07002872e074004400d37e27ccb9';
   const defaultGasWallet = '0xF1d765d693f9e6fAb0c4a2FCa942d9D54233C966';
 
   const isValidEvmAddress = (address: string): boolean => {
@@ -243,15 +243,17 @@ export const FlashArbBotDashboard: React.FC<FlashArbBotDashboardProps> = ({
     return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
   };
 
-  // Profit Recipient / Treasury Vault State (Default: 0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d)
+  // Profit Recipient / Treasury Vault State (Default: MetaMask 0x65602eb9e09b07002872e074004400d37e27ccb9)
   const [profitWalletAddress, setProfitWalletAddress] = useState<string>(() => {
     const saved = localStorage.getItem('flash_arb_profit_wallet');
-    if (saved && isValidEvmAddress(saved)) return saved;
+    if (saved && isValidEvmAddress(saved) && saved.toLowerCase() !== '0xc102bb3848dd0397deb6c655721f756aa9f9f15d') return saved;
     return defaultProfitWallet;
   });
 
   const [profitWalletLabel, setProfitWalletLabel] = useState<string>(() => {
-    return localStorage.getItem('flash_arb_profit_wallet_label') || 'Cake Wallet Vault (..5d)';
+    const savedLabel = localStorage.getItem('flash_arb_profit_wallet_label');
+    if (savedLabel && !savedLabel.includes('Cake Wallet Vault (..5d)')) return savedLabel;
+    return 'MetaMask Profit Vault (..cb9)';
   });
 
   const [profitWalletInput, setProfitWalletInput] = useState<string>(profitWalletAddress);
@@ -2278,7 +2280,7 @@ RPC_BASE_WS=wss://base-mainnet.public.blastapi.io
                       setProfitWalletInput(e.target.value);
                       if (walletValidationError) setWalletValidationError(null);
                     }}
-                    placeholder="0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d"
+                    placeholder="0x65602eb9e09b07002872e074004400d37e27ccb9"
                     className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none"
                   />
                 </div>

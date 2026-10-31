@@ -28,10 +28,10 @@ interface CashCheckModalTabProps {
 
 const SAMPLE_CHECKS = [
   {
-    name: 'JPMorgan Chase - Payroll Bonus',
+    name: 'Citibank - Consulting Retainer',
     payerName: 'Apex Quant Technologies Inc.',
-    bankName: 'JPMorgan Chase Bank, N.A.',
-    routingNumber: '021000021',
+    bankName: 'Citibank, N.A.',
+    routingNumber: '021000089',
     accountNumber: '489218491',
     checkNumber: '1042',
     amount: '2500.00',
@@ -66,13 +66,13 @@ export const CashCheckModalTab: React.FC<CashCheckModalTabProps> = ({
   botCash,
 }) => {
   // Check Form State
-  const [payerName, setPayerName] = useState<string>('Apex Quant Technologies Inc.');
-  const [issuingBank, setIssuingBank] = useState<string>('JPMorgan Chase Bank, N.A.');
-  const [routingNumber, setRoutingNumber] = useState<string>('021000021');
-  const [accountNumber, setAccountNumber] = useState<string>('489218491');
-  const [checkNumber, setCheckNumber] = useState<string>('1042');
-  const [amount, setAmount] = useState<string>('2500.00');
-  const [memo, setMemo] = useState<string>('Trading Bot Margin Allocation');
+  const [payerName, setPayerName] = useState<string>('');
+  const [issuingBank, setIssuingBank] = useState<string>('');
+  const [routingNumber, setRoutingNumber] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
+  const [checkNumber, setCheckNumber] = useState<string>('');
+  const [amount, setAmount] = useState<string>('');
+  const [memo, setMemo] = useState<string>('');
   const [settlementSpeed, setSettlementSpeed] = useState<'INSTANT' | 'STANDARD_CLEARING'>('INSTANT');
   const [destinationTarget, setDestinationTarget] = useState<'BOT' | 'VAULT'>('BOT');
   const [endorsementConfirmed, setEndorsementConfirmed] = useState<boolean>(true);
@@ -612,7 +612,7 @@ export const CashCheckModalTab: React.FC<CashCheckModalTabProps> = ({
               type="text"
               value={issuingBank}
               onChange={(e) => setIssuingBank(e.target.value)}
-              placeholder="e.g. JPMorgan Chase Bank"
+              placeholder="e.g. Bank of America, Wells Fargo, etc."
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-sm focus:border-emerald-500 focus:outline-none"
             />
           </div>

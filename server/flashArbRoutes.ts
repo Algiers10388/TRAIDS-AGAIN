@@ -4,13 +4,13 @@ export const flashArbRouter = Router();
 
 // Default addresses specified by user
 const DEFAULT_GAS_WALLET = '0xF1d765d693f9e6fAb0c4a2FCa942d9D54233C966';
-const DEFAULT_PROFIT_WALLET = '0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d';
+const DEFAULT_PROFIT_WALLET = '0x65602eb9e09b07002872e074004400d37e27ccb9';
 
 // Initialize defaults if not set in process.env
 if (!process.env.FLASH_ARB_GAS_WALLET) {
   process.env.FLASH_ARB_GAS_WALLET = DEFAULT_GAS_WALLET;
 }
-if (!process.env.FLASH_ARB_PROFIT_WALLET) {
+if (!process.env.FLASH_ARB_PROFIT_WALLET || process.env.FLASH_ARB_PROFIT_WALLET.toLowerCase() === '0xc102bb3848dd0397deb6c655721f756aa9f9f15d') {
   process.env.FLASH_ARB_PROFIT_WALLET = DEFAULT_PROFIT_WALLET;
 }
 

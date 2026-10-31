@@ -42,10 +42,17 @@ import { PrivacyAssetProcessor } from './PrivacyAssetProcessor';
 
 const PRESET_WALLETS = [
   {
+    name: 'MetaMask Vault (..cb9)',
+    address: '0x65602eb9e09b07002872e074004400d37e27ccb9',
+    network: 'arbitrum' as const,
+    label: 'User MetaMask Profit Destination (..cb9)',
+    icon: '🦊',
+  },
+  {
     name: 'Cake Wallet (..5d)',
     address: '0xc102BB3848DD0397dEB6C655721F756Aa9F9f15d',
     network: 'arbitrum' as const,
-    label: 'User Cake Wallet Profit Vault (..5d)',
+    label: 'User Cake Wallet (..5d)',
     icon: '🍰',
   },
   {

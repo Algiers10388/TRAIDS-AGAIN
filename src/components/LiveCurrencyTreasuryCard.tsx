@@ -63,17 +63,35 @@ export const LiveCurrencyTreasuryCard: React.FC<LiveCurrencyTreasuryCardProps> =
         </div>
 
         {/* Right: Quick Action Buttons & Expand Toggle */}
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           {onOpenFundBot && (
             <button
               onClick={() => onOpenFundBot('BANK')}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold transition-all cursor-pointer text-xs"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold transition-all cursor-pointer text-xs"
               title="Fund trading bot directly from bank or card"
             >
-              <Zap className="h-3 w-3 text-emerald-400" />
+              <Zap className="h-3 w-3 text-amber-400" />
               <span>Fund Bot</span>
             </button>
           )}
+
+          <button
+            onClick={onOpenBankConnect}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-semibold transition-all cursor-pointer text-xs"
+            title="Connect a US checking or savings bank account"
+          >
+            <Landmark className="h-3 w-3 text-emerald-400" />
+            <span>+ Add Bank</span>
+          </button>
+
+          <button
+            onClick={onOpenDebitLoad}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-semibold transition-all cursor-pointer text-xs"
+            title="Link a check / debit card for instant deposits"
+          >
+            <CreditCard className="h-3 w-3 text-cyan-400" />
+            <span>+ Add Card</span>
+          </button>
 
           <button
             onClick={onOpenWithdraw}
@@ -86,7 +104,7 @@ export const LiveCurrencyTreasuryCard: React.FC<LiveCurrencyTreasuryCardProps> =
 
           <button
             onClick={onOpenModal}
-            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium transition-all cursor-pointer text-xs hidden lg:inline-block"
+            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium transition-all cursor-pointer text-xs"
           >
             Manage
           </button>
