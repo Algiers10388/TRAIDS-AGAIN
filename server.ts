@@ -12,7 +12,22 @@ import { flashArbRouter } from "./server/flashArbRoutes";
 
 dotenv.config();
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf("--port");
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    return parseInt(process.argv[portArgIndex + 1], 10);
+  }
+  if (process.env.APP_PORT) {
+    return parseInt(process.env.APP_PORT, 10);
+  }
+  // Cloud Run sets PORT=8080 where Nginx runs. The Node server must bind to port 3000.
+  if (process.env.PORT && process.env.PORT !== "8080") {
+    return parseInt(process.env.PORT, 10);
+  }
+  return 3000;
+}
+
+const PORT = getPort();
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
@@ -147,7 +162,7 @@ async function startServer() {
   });
 
   // Cross-Exchange Quotes Aggregator (Live Real Order Books)
-  app.get("/api/exchanges/quotes", async (req, res) => {
+  const handleQuotesRequest = async (req: express.Request, res: express.Response) => {
     try {
       const symbol = String(req.query.symbol || "BTC/USDT");
       const { fetchLiveExchangeQuotes } = await import("./server/liveMarketData");
@@ -156,7 +171,9 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
-  });
+  };
+  app.get("/api/exchanges/quotes", handleQuotesRequest);
+  app.get("/api/market/live-quotes", handleQuotesRequest);
 
   // Download FlashArb Package Bundle (.zip) - Direct Binary Stream
   app.get("/api/download/flash-arb-zip", (_req, res) => {
@@ -359,7 +376,10 @@ Return ONLY valid JSON without markdown wrapping.`;
   // Vite middleware in dev or static files in production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

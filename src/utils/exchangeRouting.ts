@@ -44,33 +44,33 @@ export function generateExchangeQuotes(
 
     switch (ex.id) {
       case 'BINANCE':
-        // Deepest liquidity, center of gravity
-        priceSkew = timeFactor * 0.0002 + randomJitter * 0.5;
+        // Deepest liquidity baseline, ultra-low fees (0.075%)
+        priceSkew = timeFactor * 0.0006 - 0.0008 + randomJitter * 0.8;
         baseSpreadPercent = 0.00015; // 0.015% spread
         break;
       case 'COINBASE':
-        // Occasional Coinbase premium / retail skew
-        priceSkew = timeFactor * 0.0004 + 0.00025 + randomJitter;
+        // Occasional Coinbase institutional/retail premium
+        priceSkew = timeFactor * 0.0012 + 0.0014 + randomJitter;
         baseSpreadPercent = 0.00035; // 0.035% spread
         break;
       case 'KRAKEN':
-        // Kraken distinct liquidity pool
-        priceSkew = -timeFactor * 0.0003 - 0.0001 + randomJitter;
+        // Kraken European & USD order book dislocations
+        priceSkew = -timeFactor * 0.0009 + 0.0008 + randomJitter;
         baseSpreadPercent = 0.0003; // 0.03% spread
         break;
       case 'BYBIT':
-        // Bybit aggressive taker liquidity
-        priceSkew = timeFactor * 0.00025 - 0.00015 + randomJitter;
+        // Bybit aggressive maker/taker flow (0.055% taker fee)
+        priceSkew = timeFactor * 0.0007 - 0.0005 + randomJitter * 0.8;
         baseSpreadPercent = 0.0002;
         break;
       case 'NONKYC':
-        // NonKYC zero-KYC micro-spreads & unique order book dynamics
-        priceSkew = -timeFactor * 0.00035 + randomJitter * 0.8;
+        // NonKYC zero-KYC micro-spreads & unique retail order books
+        priceSkew = -timeFactor * 0.0013 + 0.0016 + randomJitter * 1.1;
         baseSpreadPercent = 0.00035;
         break;
       case 'OKX':
-        // OKX institutional tier-1 liquidity and ultra-low spread
-        priceSkew = timeFactor * 0.00018 + 0.00008 + randomJitter * 0.5;
+        // OKX institutional tier-1 liquidity
+        priceSkew = timeFactor * 0.0006 - 0.0003 + randomJitter * 0.7;
         baseSpreadPercent = 0.00018; // 0.018% tight spread
         break;
     }
@@ -317,12 +317,17 @@ export function routeOrderSmart(
  * Scan for cross-exchange spatial arbitrage opportunities across all connected exchanges
  * including NonKYC:
  * Look for instances where Best Bid on Exchange A > Best Ask on Exchange B
- * and the gross difference exceeds cumulative taker fees.
+/**
+ * Scan for cross-exchange spatial arbitrage opportunities across all connected exchanges:
+ * Automatically identifies the best market to buy (lowest cost ask price)
+ * and pairs it against the market with the greatest spread to sell (highest bid proceeds)
+ * capturing positive net spread profit after all exchange taker fees.
  */
 export function scanCrossExchangeArbitrage(
   symbol: string,
   quotes: ExchangeQuote[],
-  exchanges: ExchangeConfig[]
+  exchanges: ExchangeConfig[],
+  minProfitPercent: number = 0.02
 ): ArbitrageOpportunity | null {
   if (!quotes || !Array.isArray(quotes) || quotes.length < 2) return null;
 
@@ -335,14 +340,16 @@ export function scanCrossExchangeArbitrage(
     for (let j = 0; j < quotes.length; j++) {
       if (i === j) continue;
 
-      const buyQuote = quotes[i]; // Buy on exchange i at Ask
-      const sellQuote = quotes[j]; // Sell on exchange j at Bid
+      const buyQuote = quotes[i]; // Market to buy: lowest cost Ask
+      const sellQuote = quotes[j]; // Market to sell: paired against greatest spread Bid
+
+      if (!buyQuote || !sellQuote || buyQuote.askPrice <= 0 || sellQuote.bidPrice <= 0) continue;
 
       const buyConfig = exMap.get(buyQuote.exchangeId);
       const sellConfig = exMap.get(sellQuote.exchangeId);
 
-      const buyFeeRate = (buyConfig?.takerFeePercent || 0.1) / 100;
-      const sellFeeRate = (sellConfig?.takerFeePercent || 0.1) / 100;
+      const buyFeeRate = (buyConfig?.takerFeePercent || 0.075) / 100;
+      const sellFeeRate = (sellConfig?.takerFeePercent || 0.075) / 100;
 
       const grossSpreadUsd = sellQuote.bidPrice - buyQuote.askPrice;
       const grossSpreadPercent = (grossSpreadUsd / (buyQuote.askPrice || 1)) * 100;
@@ -369,7 +376,7 @@ export function scanCrossExchangeArbitrage(
           netSpreadPercent,
           estimatedProfitUsd: Math.max(0, (netSpreadPercent / 100) * 1000), // on $1k clip
           timestamp: Date.now(),
-          isActionable: netSpreadPercent > 0.02, // Profitable after fees
+          isActionable: netSpreadPercent >= minProfitPercent, // Profitable after fees
         };
       }
     }

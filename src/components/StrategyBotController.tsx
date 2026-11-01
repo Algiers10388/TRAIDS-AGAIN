@@ -243,20 +243,30 @@ export const StrategyBotController: React.FC<StrategyBotControllerProps> = ({
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {STRATEGY_PRESETS.map((preset) => {
-            const isActive = strategy.name === preset.name;
+            const isActive = strategy.name === preset.name || strategy.id === preset.id;
+            const isDefault = preset.id === 'best-market-spread-arbitrage';
             return (
               <button
                 key={preset.id}
                 onClick={() => handlePresetSelect(preset.id)}
-                className={`px-2.5 py-2 rounded-xl text-left border transition-all cursor-pointer text-xs ${
+                className={`px-2.5 py-2 rounded-xl text-left border transition-all cursor-pointer text-xs relative ${
                   isActive
-                    ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-200 font-semibold shadow-sm'
+                    ? 'bg-cyan-500/15 border-cyan-500/60 text-cyan-200 font-semibold shadow-md ring-1 ring-cyan-500/30'
                     : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-850 hover:text-slate-200'
                 }`}
               >
-                <div className="font-medium truncate">{preset.name}</div>
+                <div className="flex items-center justify-between gap-1 mb-0.5">
+                  <div className="font-medium truncate">{preset.name}</div>
+                  {isDefault && (
+                    <span className="text-[9px] px-1 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 uppercase tracking-tighter shrink-0 font-mono font-bold">
+                      DEFAULT
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                  TP {preset.takeProfitPercent}% · SL {preset.stopLossPercent}% · {preset.leverage}x
+                  {isDefault
+                    ? `Lowest Cost ➜ Greatest Spread · ${preset.cooldownSeconds}s loop`
+                    : `TP ${preset.takeProfitPercent}% · SL ${preset.stopLossPercent}% · ${preset.leverage}x`}
                 </div>
               </button>
             );
@@ -545,19 +555,19 @@ export const StrategyBotController: React.FC<StrategyBotControllerProps> = ({
             }
             className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-cyan-500 cursor-pointer"
           >
+            <option value="CROSS_EXCHANGE_ARBITRAGE">★ Best-Market Spread Arbitrage (Buy Lowest Cost ➜ Sell Greatest Spread)</option>
             <option value="TRIPLE_CONFLUENCE_PRO">Triple Confluence Pro (MACD+RSI+BB)</option>
             <option value="BOLLINGER_MACD_SQUEEZE">Bollinger Squeeze + MACD Surge</option>
             <option value="MACD_CROSSOVER">MACD Golden Cross Trend Follower</option>
             <option value="RSI_DIVERGENCE_REVERSAL">RSI Divergence Reversal Engine</option>
             <option value="MOMENTUM_COMBO">Momentum Combo (RSI + MACD)</option>
-            <option value="CROSS_EXCHANGE_ARBITRAGE">Cross-Exchange Spatial Arbitrage</option>
             <option value="RSI_OVERSOLD">RSI Oversold Dip Buyer</option>
             <option value="EMA_BREAKOUT">EMA 9/21 Trend Crossover</option>
             <option value="BOLLINGER_BOUNCE">Bollinger Lower Band Bounce</option>
           </select>
           <span className="text-[10px] text-slate-400 mt-1.5 block">
             {strategy.triggerType === 'CROSS_EXCHANGE_ARBITRAGE'
-              ? 'Executes instant cross-exchange spread locks'
+              ? '⚡ Default Bot Function: Pairs lowest-cost buy market against highest-spread sell market for net profit'
               : 'Evaluates indicators on tick update'}
           </span>
         </div>

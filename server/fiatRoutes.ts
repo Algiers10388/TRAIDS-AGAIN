@@ -483,13 +483,20 @@ export function setupFiatRoutes(app: express.Application) {
 
       // Support inline bank connection if provided or if not yet linked
       if (!bank && newBank && newBank.bankName) {
-        const cleanRouting = (newBank.routingNumber || "021000021").replace(/\D/g, "");
-        const cleanAccount = (newBank.accountNumber || String(Math.floor(100000000 + Math.random() * 900000000))).replace(/\D/g, "");
+        const cleanRouting = (newBank.routingNumber || "").replace(/\D/g, "");
+        const cleanAccount = (newBank.accountNumber || "").replace(/\D/g, "");
 
-        if (!isValidAbaRouting(cleanRouting)) {
+        if (cleanRouting.length !== 9 || !isValidAbaRouting(cleanRouting)) {
           return res.status(400).json({
             success: false,
             error: "Invalid ABA Routing Number checksum. Please enter a valid 9-digit US Federal Reserve transit routing number.",
+          });
+        }
+
+        if (cleanAccount.length < 4 || cleanAccount.length > 17) {
+          return res.status(400).json({
+            success: false,
+            error: "Account Number must be between 4 and 17 numeric digits.",
           });
         }
 
@@ -960,7 +967,7 @@ export function setupFiatRoutes(app: express.Application) {
           targetCard = {
             id: `crd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             brand: cleanNum.startsWith("4") ? "VISA" : cleanNum.startsWith("5") ? "MASTERCARD" : "VISA",
-            last4: cleanNum.slice(-4) || "4242",
+            last4: cleanNum.slice(-4),
             expMonth: Number(newDestination.expMonth) || 12,
             expYear: Number(newDestination.expYear) || 2029,
             cardholderName: (newDestination.cardholderName || fiatAccount.accountHolder).trim(),
@@ -995,13 +1002,20 @@ export function setupFiatRoutes(app: express.Application) {
 
         let targetBank = fiatAccount.linkedBanks.find((b) => b.id === bankId);
         if (!targetBank && newDestination && newDestination.bankName) {
-          const cleanRouting = String(newDestination.routingNumber || "021000021").replace(/\D/g, "");
-          const cleanAcc = String(newDestination.accountNumber || "1234").replace(/\D/g, "");
+          const cleanRouting = String(newDestination.routingNumber || "").replace(/\D/g, "");
+          const cleanAcc = String(newDestination.accountNumber || "").replace(/\D/g, "");
 
-          if (!isValidAbaRouting(cleanRouting)) {
+          if (cleanRouting.length !== 9 || !isValidAbaRouting(cleanRouting)) {
             return res.status(400).json({
               success: false,
-              error: "Payout bank routing failed ABA checksum validation.",
+              error: "Payout bank routing failed ABA checksum validation. Please enter a valid 9-digit US Federal Reserve transit routing number.",
+            });
+          }
+
+          if (cleanAcc.length < 4 || cleanAcc.length > 17) {
+            return res.status(400).json({
+              success: false,
+              error: "Payout bank account number must be between 4 and 17 numeric digits.",
             });
           }
 

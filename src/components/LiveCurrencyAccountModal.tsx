@@ -186,7 +186,7 @@ export const LiveCurrencyAccountModal: React.FC<LiveCurrencyAccountModalProps> =
   const [inlineCardExpYear, setInlineCardExpYear] = useState<string>('');
   const [inlineCardCvc, setInlineCardCvc] = useState<string>('');
   const [inlineCardHolder, setInlineCardHolder] = useState<string>(fiatAccount.accountHolder);
-  const [withdraw2FaCode, setWithdraw2FaCode] = useState<string>('123456');
+  const [withdraw2FaCode, setWithdraw2FaCode] = useState<string>('');
   const [withdrawSuccessReceipt, setWithdrawSuccessReceipt] = useState<FiatTransaction | null>(null);
 
   // Tab: Bot Transfer State
@@ -315,7 +315,7 @@ This document certifies real-time clearing across banking rails.
         if (selectedCardId === 'NEW' || showNewCardInFund || fiatAccount.linkedCards.length === 0) {
           const cleanCard = (newCardNumber || '').replace(/\D/g, '');
           if (cleanCard.length < 14) {
-            throw new Error('Please enter a valid 16-digit check card number (or click Auto-Fill).');
+            throw new Error('Please enter a valid 16-digit check card number.');
           }
           const cleanCvc = (newCardCvc || '').replace(/\D/g, '');
           if (cleanCvc.length < 3) {

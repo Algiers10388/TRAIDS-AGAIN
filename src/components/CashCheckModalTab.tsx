@@ -26,39 +26,6 @@ interface CashCheckModalTabProps {
   botCash: number;
 }
 
-const SAMPLE_CHECKS = [
-  {
-    name: 'Citibank - Consulting Retainer',
-    payerName: 'Apex Quant Technologies Inc.',
-    bankName: 'Citibank, N.A.',
-    routingNumber: '021000089',
-    accountNumber: '489218491',
-    checkNumber: '1042',
-    amount: '2500.00',
-    memo: 'Q3 Algorithmic Trading Bonus',
-  },
-  {
-    name: 'Bank of America - Personal Transfer',
-    payerName: 'Sarah Jenkins',
-    bankName: 'Bank of America, N.A.',
-    routingNumber: '121000358',
-    accountNumber: '891048215',
-    checkNumber: '2105',
-    amount: '5000.00',
-    memo: 'Personal Bot Trading Capital',
-  },
-  {
-    name: 'Wells Fargo - Investment Return',
-    payerName: 'Vance Capital Holdings LLC',
-    bankName: 'Wells Fargo Bank, N.A.',
-    routingNumber: '121000248',
-    accountNumber: '371894012',
-    checkNumber: '3819',
-    amount: '10000.00',
-    memo: 'Institutional Treasury Distribution',
-  },
-];
-
 export const CashCheckModalTab: React.FC<CashCheckModalTabProps> = ({
   fiatAccount,
   onAccountUpdated,
@@ -87,20 +54,6 @@ export const CashCheckModalTab: React.FC<CashCheckModalTabProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [clearedReceipt, setClearedReceipt] = useState<FiatTransaction | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
-
-  const applySample = (sample: typeof SAMPLE_CHECKS[0]) => {
-    setPayerName(sample.payerName);
-    setIssuingBank(sample.bankName);
-    setRoutingNumber(sample.routingNumber);
-    setAccountNumber(sample.accountNumber);
-    setCheckNumber(sample.checkNumber);
-    setAmount(sample.amount);
-    setMemo(sample.memo);
-    setFrontCaptured(true);
-    setBackCaptured(true);
-    setEndorsementConfirmed(true);
-    setErrorMsg(null);
-  };
 
   const handleCashCheck = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,33 +252,18 @@ export const CashCheckModalTab: React.FC<CashCheckModalTabProps> = ({
         </div>
       )}
 
-      {/* Sample Checks Quick Fill Buttons */}
+      {/* Remote Deposit Capture (RDC) Live Verification Standards */}
       <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5 text-amber-400" />
-            <span>Quick Sample Personal Checks (1-Click Fill)</span>
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            <span>Remote Check Deposit (RDC) Requirements</span>
           </span>
-          <span className="text-[10px] text-slate-500 font-mono">Simulate real Federal Reserve routing</span>
+          <span className="text-[10px] text-emerald-400 font-mono">Federal Reserve Reg CC Compliant</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {SAMPLE_CHECKS.map((sample, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => applySample(sample)}
-              className="p-2.5 rounded-lg bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 text-left transition-all cursor-pointer group"
-            >
-              <div className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors">
-                {sample.name}
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1 font-mono">
-                <span className="text-emerald-400 font-bold">${parseFloat(sample.amount).toLocaleString()}</span>
-                <span>Check #{sample.checkNumber}</span>
-              </div>
-            </button>
-          ))}
-        </div>
+        <p className="text-xs text-slate-400">
+          To deposit a check into your trading bot or treasury vault, enter the exact MICR transit routing and account numbers printed along the bottom edge of your paper check, followed by photos of the check front and endorsed back.
+        </p>
       </div>
 
       {/* Interactive Personal Check Visualizer (Front & Back) */}

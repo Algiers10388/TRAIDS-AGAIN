@@ -67,14 +67,14 @@ import {
 } from './services/firestorePersistence';
 
 const INITIAL_PORTFOLIO: PortfolioState = {
-  cash: 0,
-  startingBalance: 0,
+  cash: 5000,
+  startingBalance: 5000,
   realizedPnl: 0,
   totalTrades: 0,
   winningTrades: 0,
   losingTrades: 0,
   maxDrawdownPercent: 0,
-  peakEquity: 0,
+  peakEquity: 5000,
   totalSavingsFromSOR: 0,
 };
 
@@ -117,9 +117,9 @@ export default function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [botLogs, setBotLogs] = useState<string[]>([
-    'Apex Quant Agent multi-exchange gateway initialized.',
-    'Connected to Binance, Coinbase Pro, Kraken & Bybit order books.',
-    'Smart Order Router (SOR) active: auto-comparing prices across all exchanges for best execution.',
+    '⚡ Bot Strategy Default: Best-Market Spread Arbitrage (Buy Lowest Cost Market ➜ Sell Greatest Spread Market).',
+    'Connected to Binance, Coinbase Pro, Kraken, Bybit, OKX & NonKYC order books.',
+    'Smart Order Router (SOR) active: continuous multi-market pairing and automated profit capture.',
   ]);
 
   const [botRunning, setBotRunning] = useState<boolean>(true);
@@ -600,10 +600,10 @@ export default function App() {
     ]
   );
 
-  // Detect cross-exchange spatial arbitrage from live order book quotes
+  // Detect cross-exchange spatial arbitrage from live order book quotes (lowest cost buy -> greatest spread sell)
   const arbitrageOpp: ArbitrageOpportunity | null = useMemo(
-    () => scanCrossExchangeArbitrage(selectedSymbol, exchangeQuotes, exchanges),
-    [selectedSymbol, exchangeQuotes, exchanges]
+    () => scanCrossExchangeArbitrage(selectedSymbol, exchangeQuotes, exchanges, strategy.minArbitrageProfitPercent ?? 0.02),
+    [selectedSymbol, exchangeQuotes, exchanges, strategy.minArbitrageProfitPercent]
   );
 
   // Total unrealized PnL across all open positions
@@ -1040,14 +1040,15 @@ export default function App() {
     }
   };
 
-  // Instant Cross-Exchange Arbitrage Execution
+  // Instant Cross-Exchange Best-Market Spread Arbitrage Execution
   const handleExecuteArbitrage = (opp: ArbitrageOpportunity) => {
     const now = Date.now();
-    const clipNotional = Math.min(portfolio.cash * 0.25, 2000);
-    if (clipNotional < 50) {
+    const sizePercent = (strategy.orderSizePercent || 25) / 100;
+    const clipNotional = Math.min(Math.max(portfolio.cash * sizePercent, 15), 2500);
+    if (portfolio.cash < 15) {
       setBotLogs((prev) => [
+        `[${new Date(now).toLocaleTimeString()}] Best-Market Arbitrage paused: Available bot capital (${formatCurrency(portfolio.cash)}) is below minimum clip requirement ($15.00).`,
         ...prev,
-        `[${new Date(now).toLocaleTimeString()}] Arbitrage aborted: Insufficient available cash.`,
       ]);
       return;
     }
@@ -1073,7 +1074,7 @@ export default function App() {
       fee: buyFee,
       exchange: opp.buyExchange,
       exchangeName: opp.buyExchangeName,
-      reason: `Arbitrage Leg 1: Bought on ${opp.buyExchangeName}`,
+      reason: `Best-Market Spread Arb (Leg 1): Bought on lowest cost market (${opp.buyExchangeName})`,
     };
 
     const sellLegOrder: Order = {
@@ -1090,7 +1091,7 @@ export default function App() {
       exchangeName: opp.sellExchangeName,
       pnl: netProfit,
       pnlPercent: opp.netSpreadPercent,
-      reason: `Arbitrage Leg 2: Sold on ${opp.sellExchangeName} (Net spread +${opp.netSpreadPercent.toFixed(3)}%)`,
+      reason: `Best-Market Spread Arb (Leg 2): Sold on greatest spread market (${opp.sellExchangeName}) (Net spread +${opp.netSpreadPercent.toFixed(3)}%)`,
     };
 
     setPortfolio((p) => {
@@ -1136,8 +1137,8 @@ export default function App() {
     }
 
     setBotLogs((prev) => [
+      `[${new Date(now).toLocaleTimeString()}] ⚡ [BEST-MARKET ARBITRAGE FILLED] Purchased on lowest-cost market (${opp.buyExchangeName} @ ${formatCurrency(opp.buyAskPrice, activeAsset.decimals)}) ➜ Sold on greatest-spread market (${opp.sellExchangeName} @ ${formatCurrency(opp.sellBidPrice, activeAsset.decimals)}) | Net Profit: +${formatCurrency(netProfit)} (+${opp.netSpreadPercent.toFixed(3)}%)`,
       ...prev,
-      `[${new Date(now).toLocaleTimeString()}] ⚡ ARBITRAGE EXECUTED: Bought on ${opp.buyExchangeName} @ ${formatCurrency(opp.buyAskPrice, activeAsset.decimals)} & Sold on ${opp.sellExchangeName} @ ${formatCurrency(opp.sellBidPrice, activeAsset.decimals)} -> Net Spread Profit: +${formatCurrency(netProfit)} (+${opp.netSpreadPercent.toFixed(3)}%)`,
     ]);
 
     // If in Live Real Money Mode, dispatch atomic dual-leg orders

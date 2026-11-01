@@ -271,21 +271,25 @@ export const MultiExchangeComparisonCard: React.FC<MultiExchangeComparisonCardPr
           </div>
           <div>
             <div className="font-bold text-white flex items-center gap-2">
-              Cross-Exchange Arbitrage Scanner
-              {arbitrageOpp && arbitrageOpp.isActionable && (
+              Best-Market Spread Arbitrage Engine
+              {arbitrageOpp && arbitrageOpp.isActionable ? (
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono animate-pulse">
                   WINDOW OPEN (+{arbitrageOpp.netSpreadPercent.toFixed(3)}% Net)
+                </span>
+              ) : (
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">
+                  ACTIVE PAIR SCANNER
                 </span>
               )}
             </div>
             <div className="text-[11px] text-slate-300 font-mono mt-0.5">
               {arbitrageOpp && arbitrageOpp.isActionable ? (
                 <span>
-                  Opportunity: Buy on <strong className="text-emerald-400">{arbitrageOpp.buyExchangeName}</strong> @ {formatCurrency(arbitrageOpp.buyAskPrice, decimals)} & Sell on <strong className="text-cyan-400">{arbitrageOpp.sellExchangeName}</strong> @ {formatCurrency(arbitrageOpp.sellBidPrice, decimals)}
+                  Best Market to Buy: <strong className="text-emerald-400">{arbitrageOpp.buyExchangeName}</strong> (Ask: {formatCurrency(arbitrageOpp.buyAskPrice, decimals)}) ➔ Paired Greatest Spread Sell: <strong className="text-cyan-400">{arbitrageOpp.sellExchangeName}</strong> (Bid: {formatCurrency(arbitrageOpp.sellBidPrice, decimals)})
                 </span>
               ) : (
                 <span>
-                  Max market spread: {formatCurrency(maxSpreadUsd, decimals)}. Monitoring cross-exchange dislocations after double-leg taker fees.
+                  Continuous Best-Market Pairing: Auto-evaluating lowest cost buy venues against highest bid liquidation markets. Max spread: {formatCurrency(maxSpreadUsd, decimals)}.
                 </span>
               )}
             </div>
