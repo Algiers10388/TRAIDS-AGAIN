@@ -1138,6 +1138,29 @@ export default function App() {
       }).catch(() => {});
     }
 
+    // Persist to Cloud SQL PostgreSQL
+    fetch('/api/trade/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user?.uid || undefined,
+        tradeId: `arb-${now}`,
+        symbol: opp.symbol,
+        side: 'BUY_AND_SELL',
+        type: 'ARBITRAGE',
+        buyExchange: opp.buyExchangeName,
+        sellExchange: opp.sellExchangeName,
+        buyPrice: opp.buyAskPrice,
+        sellPrice: opp.sellBidPrice,
+        grossSpreadPercent: opp.grossSpreadPercent,
+        netSpreadPercent: opp.netSpreadPercent,
+        netProfitUsd: netProfit,
+        notionalUsd: clipNotional,
+        route: `${opp.buyExchangeName} -> ${opp.sellExchangeName}`,
+        status: 'COMPLETED',
+      }),
+    }).catch(() => {});
+
     setBotLogs((prev) => [
       `[${new Date(now).toLocaleTimeString()}] ⚡ [BEST-MARKET ARBITRAGE FILLED] Purchased on lowest-cost market (${opp.buyExchangeName} @ ${formatCurrency(opp.buyAskPrice, activeAsset.decimals)}) ➜ Sold on greatest-spread market (${opp.sellExchangeName} @ ${formatCurrency(opp.sellBidPrice, activeAsset.decimals)}) | Net Profit: +${formatCurrency(netProfit)} (+${opp.netSpreadPercent.toFixed(3)}%)`,
       ...prev,

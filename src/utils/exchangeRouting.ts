@@ -160,17 +160,17 @@ export function routeOrderSmart(
         ? fallbackPrice
         : defaultAsset?.price ||
           (symbol.startsWith('BTC')
-            ? 84210
+            ? 76905
             : symbol.startsWith('ETH')
-            ? 2675.5
+            ? 2253.5
             : symbol.startsWith('SOL')
-            ? 116.8
+            ? 92.3
             : symbol.startsWith('XRP')
-            ? 1.53
+            ? 1.25
             : symbol.startsWith('PEPE')
-            ? 0.0000095
+            ? 0.0000048
             : symbol.startsWith('DOGE')
-            ? 0.14
+            ? 0.074
             : 100);
 
     candidateQuotes = generateExchangeQuotes(symbol, resolvedPrice, safeExchanges);

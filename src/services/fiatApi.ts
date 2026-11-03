@@ -3,6 +3,8 @@ import {
   FiatTransaction,
   LinkedBankAccount,
   LinkedDebitCard,
+  ThreeDSChallengeSession,
+  ThreeDSVerificationResult,
 } from '../types';
 
 export interface CardInput {
@@ -281,4 +283,46 @@ export async function updateBotProtection(
     body: JSON.stringify(settings),
   });
   return safeParseJson(res, 'Failed to update bot protection');
+}
+
+export async function initiate3DsChallenge(payload: {
+  amount: number;
+  depositType?: 'CARD' | 'BANK';
+  cardId?: string;
+  newCard?: CardInput;
+  bankId?: string;
+  newBank?: any;
+  transferSpeed?: string;
+  directToBot?: boolean;
+}): Promise<{
+  success: boolean;
+  session: ThreeDSChallengeSession;
+  suggestedOtp?: string;
+  message: string;
+}> {
+  const res = await fetch('/api/fiat/3ds/initiate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return safeParseJson(res, 'Failed to initiate 3D Secure challenge');
+}
+
+export async function verify3DsChallenge(payload: {
+  sessionId: string;
+  authCode?: string;
+  biometricConfirmed?: boolean;
+}): Promise<{
+  success: boolean;
+  result: ThreeDSVerificationResult;
+  transaction: FiatTransaction;
+  account: FiatAccount;
+  message: string;
+}> {
+  const res = await fetch('/api/fiat/3ds/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return safeParseJson(res, 'Failed to verify 3D Secure authentication');
 }

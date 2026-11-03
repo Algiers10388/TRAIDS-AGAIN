@@ -9,6 +9,16 @@ import { setupExchangeRoutes } from "./server/exchangeRoutes";
 import { aiRouter } from "./server/aiRoutes";
 import { walletRouter } from "./server/walletRoutes";
 import { flashArbRouter } from "./server/flashArbRoutes";
+import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import { getOrCreateUser } from "./src/db/users.ts";
+import {
+  saveUserPortfolio,
+  getUserPortfolio,
+  saveUserStrategy,
+  getUserStrategies,
+  recordTradeExecution,
+  getRecentTradeExecutions,
+} from "./src/db/botPersistence.ts";
 
 dotenv.config();
 
@@ -370,6 +380,93 @@ Return ONLY valid JSON without markdown wrapping.`;
         success: false,
         error: err.message || "Failed to generate strategy analysis",
       });
+    }
+  });
+
+  // Cloud SQL Database API Routes
+  app.post("/api/user/sync", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid || !req.user?.email) {
+        return res.status(400).json({ success: false, error: "Missing user information" });
+      }
+      const user = await getOrCreateUser(req.user.uid, req.user.email);
+      res.json({ success: true, user });
+    } catch (err: any) {
+      console.error("Failed to sync user to Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to sync user" });
+    }
+  });
+
+  app.post("/api/portfolio/save", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ success: false, error: "Unauthorized" });
+      }
+      const saved = await saveUserPortfolio(req.user.uid, req.body.portfolio);
+      res.json({ success: true, portfolio: saved });
+    } catch (err: any) {
+      console.error("Failed to save portfolio to Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to save portfolio" });
+    }
+  });
+
+  app.get("/api/portfolio", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ success: false, error: "Unauthorized" });
+      }
+      const portfolio = await getUserPortfolio(req.user.uid);
+      res.json({ success: true, portfolio });
+    } catch (err: any) {
+      console.error("Failed to fetch portfolio from Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to fetch portfolio" });
+    }
+  });
+
+  app.post("/api/strategy/save", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ success: false, error: "Unauthorized" });
+      }
+      const saved = await saveUserStrategy(req.user.uid, req.body.strategy);
+      res.json({ success: true, strategy: saved });
+    } catch (err: any) {
+      console.error("Failed to save strategy to Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to save strategy" });
+    }
+  });
+
+  app.get("/api/strategy", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.uid) {
+        return res.status(401).json({ success: false, error: "Unauthorized" });
+      }
+      const strategies = await getUserStrategies(req.user.uid);
+      res.json({ success: true, strategies });
+    } catch (err: any) {
+      console.error("Failed to fetch strategies from Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to fetch strategies" });
+    }
+  });
+
+  app.post("/api/trade/record", async (req, res) => {
+    try {
+      const record = await recordTradeExecution(req.body);
+      res.json({ success: true, record });
+    } catch (err: any) {
+      console.error("Failed to record trade execution in Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to record trade" });
+    }
+  });
+
+  app.get("/api/trade/recent", async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+      const trades = await getRecentTradeExecutions(userId);
+      res.json({ success: true, trades });
+    } catch (err: any) {
+      console.error("Failed to get trade executions from Cloud SQL:", err);
+      res.status(500).json({ success: false, error: err.message || "Failed to get trade executions" });
     }
   });
 

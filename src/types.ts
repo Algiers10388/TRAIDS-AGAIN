@@ -307,6 +307,7 @@ export interface LinkedBankAccount {
 export interface BotSecuritySettings {
   emergencyFreezeActive: boolean;
   twoFactorEnforced: boolean;
+  threeDsEnforced?: boolean;
   maxSingleOrderUsd: number;
   maxDailyLossUsd: number;
   slippageTolerancePercent: number;
@@ -315,6 +316,40 @@ export interface BotSecuritySettings {
   lastSecurityAuditTimestamp: number;
   securityGrade: 'FORTRESS_A_PLUS' | 'A_TIER' | 'GUARDED';
   activeThreatLevel: 'NOMINAL' | 'ELEVATED' | 'CRITICAL';
+}
+
+export interface ThreeDSChallengeSession {
+  sessionId: string;
+  amount: number;
+  currency: string;
+  merchantName: string;
+  cardBrand: 'VISA' | 'MASTERCARD' | 'AMEX' | 'DISCOVER';
+  cardLast4: string;
+  cardholderName: string;
+  protocolVersion: '2.2.0';
+  authMethod: 'SMS_OTP' | 'PUSH_NOTIFICATION' | 'BIOMETRIC_PASSKEY';
+  maskedPhoneNumber: string;
+  expiresAt: number;
+  eci: string;
+  dsTransId: string;
+  threeDsServerTransId: string;
+  acsTransId: string;
+  directToBot: boolean;
+  depositType: 'CARD' | 'BANK';
+  targetBankId?: string;
+  targetCardId?: string;
+}
+
+export interface ThreeDSVerificationResult {
+  verified: boolean;
+  cavv: string;
+  eci: string;
+  liabilityShift: 'ISSUER_LIABLE' | 'MERCHANT_LIABLE';
+  authTimestamp: number;
+  status: 'AUTHENTICATED' | 'REJECTED';
+  message: string;
+  transaction?: FiatTransaction;
+  account?: FiatAccount;
 }
 
 export interface SecurityAuditReport {

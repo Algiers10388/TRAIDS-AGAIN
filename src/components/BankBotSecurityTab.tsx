@@ -35,6 +35,7 @@ export const BankBotSecurityTab: React.FC<BankBotSecurityTabProps> = ({
   // Editable Protection Parameters
   const [emergencyFreeze, setEmergencyFreeze] = useState<boolean>(false);
   const [twoFactorEnforced, setTwoFactorEnforced] = useState<boolean>(fiatAccount.twoFactorEnabled);
+  const [threeDsEnforced, setThreeDsEnforced] = useState<boolean>(true);
   const [maxSingleOrder, setMaxSingleOrder] = useState<string>('5000');
   const [maxDailyLoss, setMaxDailyLoss] = useState<string>('250');
   const [slippageTol, setSlippageTol] = useState<string>('0.5');
@@ -69,6 +70,7 @@ export const BankBotSecurityTab: React.FC<BankBotSecurityTabProps> = ({
       const res = await updateBotProtection({
         emergencyFreezeActive: emergencyFreeze,
         twoFactorEnforced,
+        threeDsEnforced,
         maxSingleOrderUsd: parseFloat(maxSingleOrder) || 5000,
         maxDailyLossUsd: parseFloat(maxDailyLoss) || 250,
         slippageTolerancePercent: parseFloat(slippageTol) || 0.5,
@@ -293,6 +295,28 @@ export const BankBotSecurityTab: React.FC<BankBotSecurityTabProps> = ({
               </div>
             </label>
           </div>
+        </div>
+
+        <div className="pt-1">
+          <label className="flex items-center gap-2.5 text-xs text-slate-300 bg-slate-950 p-3 rounded-xl border border-cyan-500/30 cursor-pointer hover:border-cyan-500/50 transition-colors">
+            <input
+              type="checkbox"
+              checked={threeDsEnforced}
+              onChange={(e) => setThreeDsEnforced(e.target.checked)}
+              className="rounded text-cyan-500 focus:ring-cyan-500 bg-slate-900 border-slate-700 h-4 w-4"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white block">3D Secure 2.2 Strong Customer Authentication (SCA)</span>
+                <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-mono border border-cyan-500/40">
+                  Verified by Visa / Mastercard ID Check
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                Enforces EMVCo cryptographic challenge (SMS OTP or biometric passkey) with issuing bank liability shift (ECI 05/02) on all fiat deposits and card loads.
+              </span>
+            </div>
+          </label>
         </div>
 
         <div className="pt-2 flex justify-end">

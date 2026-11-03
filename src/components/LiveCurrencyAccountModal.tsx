@@ -33,6 +33,8 @@ import {
   FiatTransaction,
   LinkedBankAccount,
   LinkedDebitCard,
+  ThreeDSChallengeSession,
+  ThreeDSVerificationResult,
 } from '../types';
 import {
   depositViaCard,
@@ -44,10 +46,12 @@ import {
   transferBetweenFiatAndBot,
   withdrawToBank,
   withdrawFunds,
+  initiate3DsChallenge,
 } from '../services/fiatApi';
 import { formatCurrency } from '../utils/cryptoMath';
 import { CashCheckModalTab } from './CashCheckModalTab';
 import { BankBotSecurityTab } from './BankBotSecurityTab';
+import { ThreeDSecureModal } from './ThreeDSecureModal';
 
 export type TabType =
   | 'FUND_BOT'
@@ -124,6 +128,11 @@ export const LiveCurrencyAccountModal: React.FC<LiveCurrencyAccountModalProps> =
   const [bankSearchQuery, setBankSearchQuery] = useState<string>('');
   const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'WITHDRAW' | 'DEPOSIT' | 'BOT_TRANSFER'>('ALL');
   const [ledgerSearch, setLedgerSearch] = useState<string>('');
+
+  // 3D Secure 2.2 Strong Customer Authentication State
+  const [active3DsSession, setActive3DsSession] = useState<ThreeDSChallengeSession | null>(null);
+  const [suggested3DsOtp, setSuggested3DsOtp] = useState<string | undefined>(undefined);
+  const [is3DsModalOpen, setIs3DsModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialTab && isOpen) {
@@ -255,6 +264,28 @@ This document certifies real-time clearing across banking rails.
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
+  const handle3DsSuccess = (result: ThreeDSVerificationResult) => {
+    setIs3DsModalOpen(false);
+    setActive3DsSession(null);
+    if (result.account) {
+      onAccountUpdated(result.account, result.message);
+    }
+    if (result.transaction) {
+      setFundSuccessReceipt(result.transaction);
+      if (
+        onBotCashAdjusted &&
+        (result.transaction.destinationName?.toLowerCase().includes('bot') ||
+          result.transaction.type === 'TRANSFER_TO_BOT_CAPITAL')
+      ) {
+        onBotCashAdjusted(result.transaction.amount);
+      }
+    }
+    showFeedback(
+      'success',
+      `3D Secure 2.2 Verified! Cryptogram: ${result.cavv.slice(0, 10)}... Issuer liability shift applied.`
+    );
+  };
+
   // Primary: Handle Direct Transfer to Fund Trading Bot
   const handleFundBotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -312,7 +343,11 @@ This document certifies real-time clearing across banking rails.
         setFundSuccessReceipt(res.transaction);
         showFeedback('success', res.message);
       } else if (fundBotSourceType === 'CARD') {
-        if (selectedCardId === 'NEW' || showNewCardInFund || fiatAccount.linkedCards.length === 0) {
+        const isNew = selectedCardId === 'NEW' || showNewCardInFund || fiatAccount.linkedCards.length === 0;
+        let cardPayload: any = undefined;
+        let cId: string | undefined = undefined;
+
+        if (isNew) {
           const cleanCard = (newCardNumber || '').replace(/\D/g, '');
           if (cleanCard.length < 14) {
             throw new Error('Please enter a valid 16-digit check card number.');
@@ -321,35 +356,29 @@ This document certifies real-time clearing across banking rails.
           if (cleanCvc.length < 3) {
             throw new Error('Please enter the 3-digit CVV security code.');
           }
-
-          const res = await depositViaCard(
-            amt,
-            undefined,
-            {
-              cardNumber: cleanCard,
-              expMonth: parseInt(newCardExpMonth || '12', 10),
-              expYear: parseInt(newCardExpYear || '2029', 10),
-              cvc: cleanCvc,
-              cardholderName: newCardHolder || fiatAccount.accountHolder || 'Authorized Trader',
-              saveCard: saveNewCard,
-            },
-            true
-          );
-          onAccountUpdated(res.account, res.message);
-          if (onBotCashAdjusted) {
-            onBotCashAdjusted(amt);
-          }
-          setFundSuccessReceipt(res.transaction);
-          showFeedback('success', res.message);
+          cardPayload = {
+            cardNumber: cleanCard,
+            expMonth: parseInt(newCardExpMonth || '12', 10),
+            expYear: parseInt(newCardExpYear || '2029', 10),
+            cvc: cleanCvc,
+            cardholderName: newCardHolder || fiatAccount.accountHolder || 'Authorized Trader',
+            saveCard: saveNewCard,
+          };
         } else {
-          const res = await depositViaCard(amt, selectedCardId, undefined, true);
-          onAccountUpdated(res.account, res.message);
-          if (onBotCashAdjusted) {
-            onBotCashAdjusted(amt);
-          }
-          setFundSuccessReceipt(res.transaction);
-          showFeedback('success', res.message);
+          cId = selectedCardId;
         }
+
+        const challenge = await initiate3DsChallenge({
+          amount: amt,
+          depositType: 'CARD',
+          cardId: cId,
+          newCard: cardPayload,
+          directToBot: true,
+        });
+
+        setActive3DsSession(challenge.session);
+        setSuggested3DsOtp(challenge.suggestedOtp);
+        setIs3DsModalOpen(true);
       } else if (fundBotSourceType === 'VAULT') {
         if (amt > fiatAccount.availableBalance) {
           throw new Error(`Insufficient funds in Live Vault ($${fiatAccount.availableBalance.toFixed(2)} available).`);
@@ -380,6 +409,9 @@ This document certifies real-time clearing across banking rails.
 
     setIsLoading(true);
     try {
+      let cardPayload: any = undefined;
+      let cId: string | undefined = undefined;
+
       if (selectedCardId === 'NEW') {
         const cleanCard = newCardNumber.replace(/\s+/g, '');
         if (cleanCard.length < 15) {
@@ -388,35 +420,29 @@ This document certifies real-time clearing across banking rails.
         if (!newCardCvc || newCardCvc.length < 3) {
           throw new Error('Please enter the 3-digit CVV from the back of your card.');
         }
-
-        const res = await depositViaCard(
-          amt,
-          undefined,
-          {
-            cardNumber: cleanCard,
-            expMonth: parseInt(newCardExpMonth, 10),
-            expYear: parseInt(newCardExpYear, 10),
-            cvc: newCardCvc,
-            cardholderName: newCardHolder,
-            saveCard: saveNewCard,
-          },
-          depositTarget === 'BOT'
-        );
-
-        onAccountUpdated(res.account, res.message);
-        if (depositTarget === 'BOT' && onBotCashAdjusted) {
-          onBotCashAdjusted(amt);
-        }
-        showFeedback('success', res.message);
-        setSelectedCardId(res.account.linkedCards[res.account.linkedCards.length - 1]?.id || 'NEW');
+        cardPayload = {
+          cardNumber: cleanCard,
+          expMonth: parseInt(newCardExpMonth, 10),
+          expYear: parseInt(newCardExpYear, 10),
+          cvc: newCardCvc,
+          cardholderName: newCardHolder,
+          saveCard: saveNewCard,
+        };
       } else {
-        const res = await depositViaCard(amt, selectedCardId, undefined, depositTarget === 'BOT');
-        onAccountUpdated(res.account, res.message);
-        if (depositTarget === 'BOT' && onBotCashAdjusted) {
-          onBotCashAdjusted(amt);
-        }
-        showFeedback('success', res.message);
+        cId = selectedCardId;
       }
+
+      const challenge = await initiate3DsChallenge({
+        amount: amt,
+        depositType: 'CARD',
+        cardId: cId,
+        newCard: cardPayload,
+        directToBot: depositTarget === 'BOT',
+      });
+
+      setActive3DsSession(challenge.session);
+      setSuggested3DsOtp(challenge.suggestedOtp);
+      setIs3DsModalOpen(true);
     } catch (err: any) {
       showFeedback('error', err.message || 'Debit card transaction failed.');
     } finally {
@@ -1135,6 +1161,13 @@ This document certifies real-time clearing across banking rails.
                       )}
                     </button>
                   </div>
+
+                  {fundSuccessReceipt.id.includes('3ds') && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-[11px] text-emerald-300 font-mono">
+                      <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span>3D Secure 2.2 SCA Verified • EMVCo Cryptogram Authorized • Issuer Liability Shift Active</span>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                     <button
@@ -1866,9 +1899,15 @@ This document certifies real-time clearing across banking rails.
                       </div>
                     ) : (
                       <>
-                        <Zap className="h-5 w-5" />
+                        {fundBotSourceType === 'CARD' ? (
+                          <ShieldCheck className="h-5 w-5" />
+                        ) : (
+                          <Zap className="h-5 w-5" />
+                        )}
                         <span>
-                          Complete Transfer & Fund Bot: ${parseFloat(fundBotAmount || '0').toFixed(2)} USD
+                          {fundBotSourceType === 'CARD'
+                            ? `Authorize 3DS & Fund Bot: $${parseFloat(fundBotAmount || '0').toFixed(2)} USD`
+                            : `Complete Transfer & Fund Bot: $${parseFloat(fundBotAmount || '0').toFixed(2)} USD`}
                         </span>
                       </>
                     )}
@@ -2776,26 +2815,34 @@ This document certifies real-time clearing across banking rails.
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-cyan-500/10 transition-all"
-                  >
-                    {isLoading ? (
-                      <div className="flex items-center gap-2">
-                        <div className="h-3.5 w-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                        <span>Authorizing 3D Secure Rail...</span>
+                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-400">
+                      <div className="flex items-center gap-1.5 text-cyan-400 font-mono">
+                        <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
+                        <span>3DS 2.2 Strong Customer Authentication (SCA) Enforced</span>
                       </div>
-                    ) : (
-                      <>
-                        <Zap className="h-4 w-4" />
-                        <span>Instant Load ${parseFloat(cardDepositAmount || '0').toFixed(2)} USD</span>
-                      </>
-                    )}
-                  </button>
-                </form>
+                      <span className="text-[10px] text-slate-500">Zero Fraud Liability</span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-cyan-500/10 transition-all"
+                    >
+                      {isLoading ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-3.5 w-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                          <span>Authorizing 3D Secure Rail...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <ShieldCheck className="h-4 w-4" />
+                          <span>Authorize 3DS & Load ${parseFloat(cardDepositAmount || '0').toFixed(2)} USD</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
               </div>
-            </div>
           )}
 
           {/* TAB 2: CONNECT & DEPOSIT ANY BANK */}
@@ -4328,6 +4375,19 @@ This document certifies real-time clearing across banking rails.
           </div>
         </div>
       </div>
+
+      {/* 3D Secure 2.2 Strong Customer Authentication Modal */}
+      <ThreeDSecureModal
+        isOpen={is3DsModalOpen}
+        session={active3DsSession}
+        suggestedOtp={suggested3DsOtp}
+        onSuccess={handle3DsSuccess}
+        onCancel={() => {
+          setIs3DsModalOpen(false);
+          setActive3DsSession(null);
+          showFeedback('error', '3D Secure transfer approval was cancelled.');
+        }}
+      />
     </div>
   );
 };
