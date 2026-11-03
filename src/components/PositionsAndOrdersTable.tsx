@@ -311,7 +311,7 @@ export const PositionsAndOrdersTable: React.FC<PositionsAndOrdersTableProps> = (
                 Awaiting telemetry events...
               </div>
             ) : (
-              botLogs.slice(-25).reverse().map((log, i) => (
+              botLogs.slice(0, 35).map((log, i) => (
                 <div key={i} className="flex items-start gap-2 py-0.5">
                   <span className="text-cyan-500 font-semibold select-none">&gt;</span>
                   <span className="text-slate-300 leading-relaxed">{log}</span>

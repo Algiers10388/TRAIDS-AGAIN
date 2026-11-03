@@ -1101,6 +1101,7 @@ export default function App() {
       const losingTrades = p.losingTrades + (netProfit <= 0 ? 1 : 0);
       const realizedPnl = p.realizedPnl + netProfit;
       const peakEquity = Math.max(p.peakEquity, newCash);
+      const totalSavingsFromSOR = p.totalSavingsFromSOR + Math.max(0, netProfit);
 
       return {
         ...p,
@@ -1110,6 +1111,7 @@ export default function App() {
         losingTrades,
         realizedPnl,
         peakEquity,
+        totalSavingsFromSOR,
       };
     });
 
