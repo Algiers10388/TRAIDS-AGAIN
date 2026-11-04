@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Activity,
+  AlertCircle,
   AlertTriangle,
   ArrowRight,
   ArrowUpRight,
@@ -8,6 +9,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  Globe,
   Key,
   Lock,
   Network,
@@ -21,10 +23,13 @@ import {
   Wallet,
   Wifi,
   X,
+  XCircle,
 } from 'lucide-react';
 import {
   CredentialsSummary,
   ExchangeConfig,
+  ExchangeHealthCheckSummary,
+  ExchangeHealthReport,
   ExchangeId,
   ExchangeWallet,
   ExchangeWalletTransaction,
@@ -36,6 +41,7 @@ import {
   unlinkExchangeWallet,
   executeWalletTransaction,
   fetchWalletTransactions,
+  fetchExchangeHealthCheck,
 } from '../services/exchangeApi';
 import { ReceivePrivacyCoinModal } from './ReceivePrivacyCoinModal';
 
@@ -64,7 +70,7 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
   onRefreshCredentials,
   onOpenOkxWallet,
 }) => {
-  const [activeTab, setActiveTab] = useState<'WALLETS' | 'ROUTING'>('WALLETS');
+  const [activeTab, setActiveTab] = useState<'WALLETS' | 'ROUTING' | 'HEALTH_CHECK'>('WALLETS');
   const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [isPinging, setIsPinging] = useState(false);
   const [pingSuccess, setPingSuccess] = useState(false);
@@ -73,6 +79,12 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
   const [wallets, setWallets] = useState<Record<ExchangeId, ExchangeWallet> | null>(null);
   const [loadingWallets, setLoadingWallets] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+
+  // Exchange API Health & Scope Diagnostic State
+  const [healthSummary, setHealthSummary] = useState<ExchangeHealthCheckSummary | null>(null);
+  const [loadingHealthCheck, setLoadingHealthCheck] = useState(false);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [copiedIp, setCopiedIp] = useState(false);
 
   // Linking Form State
   const [linkingExchange, setLinkingExchange] = useState<ExchangeId | null>(null);
@@ -103,8 +115,22 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
     if (isOpen) {
       loadWallets();
       loadTransactions();
+      loadHealthCheck();
     }
   }, [isOpen]);
+
+  const loadHealthCheck = async () => {
+    try {
+      setLoadingHealthCheck(true);
+      setHealthError(null);
+      const summary = await fetchExchangeHealthCheck();
+      setHealthSummary(summary);
+    } catch (err: any) {
+      setHealthError(err.message || 'Failed to complete exchange API health check.');
+    } finally {
+      setLoadingHealthCheck(false);
+    }
+  };
 
   const loadWallets = async () => {
     try {
@@ -300,6 +326,65 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
     },
   ];
 
+  const healthExchangesList: Array<{
+    id: ExchangeId;
+    name: string;
+    brandColor: string;
+    endpoint: string;
+    defaultAsset: string;
+    description: string;
+  }> = [
+    {
+      id: 'KRAKEN',
+      name: 'Kraken Financial',
+      brandColor: '#5741D9',
+      endpoint: 'https://api.kraken.com',
+      defaultAsset: 'BTC/USD',
+      description: 'US Regulated Banking Rails, REST V0 Matching & Funding Vault',
+    },
+    {
+      id: 'BINANCE',
+      name: 'Binance Global / US',
+      brandColor: '#F0B90B',
+      endpoint: 'https://api.binance.com / api.binance.us',
+      defaultAsset: 'BTC/USDT',
+      description: 'Global Spot Matching Engine with Sub-Millisecond Execution',
+    },
+    {
+      id: 'NONKYC',
+      name: 'NonKYC Exchange',
+      brandColor: '#A855F7',
+      endpoint: 'https://api.nonkyc.io',
+      defaultAsset: 'BTC/USDT',
+      description: 'Zero-KYC Spot Order Book & High-Privacy Cryptocurrency Settlement',
+    },
+    {
+      id: 'OKX',
+      name: 'OKX Institutional & Spot',
+      brandColor: '#2563EB',
+      endpoint: 'https://www.okx.com',
+      defaultAsset: 'BTC/USDT',
+      description: 'OKX V5 REST/WS Gateway & Web3 Self-Custody Multi-Chain Vault',
+    },
+    {
+      id: 'COINBASE',
+      name: 'Coinbase Advanced Trade',
+      brandColor: '#0052FF',
+      endpoint: 'https://api.exchange.coinbase.com',
+      defaultAsset: 'BTC/USD',
+      description: 'Institutional Grade Custody & Advanced Trade Matching',
+    },
+    {
+      id: 'BYBIT',
+      name: 'Bybit Institutional',
+      brandColor: '#F7A600',
+      endpoint: 'https://api.bybit.com',
+      defaultAsset: 'BTC/USDT',
+      description: 'Bybit V5 Unified Trading Account & Spot Matching Rails',
+    },
+  ];
+
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-4xl rounded-2xl bg-[#0F1422] border border-cyan-500/30 shadow-2xl shadow-cyan-500/10 overflow-hidden flex flex-col max-h-[92vh]">
@@ -353,6 +438,34 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
             >
               <Wallet className="h-3.5 w-3.5" />
               <span>Exchange Wallets ({exchangeCards.length})</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('HEALTH_CHECK');
+                if (!healthSummary && !loadingHealthCheck) {
+                  loadHealthCheck();
+                }
+              }}
+              className={`py-3 px-4 font-mono text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                activeTab === 'HEALTH_CHECK'
+                  ? 'border-cyan-400 text-cyan-300'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Activity className="h-3.5 w-3.5" />
+              <span>API Health & Scopes</span>
+              {healthSummary && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    healthSummary.healthyCount > 0
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {healthSummary.healthyCount}/{healthSummary.totalConfigured || 0} Ready
+                </span>
+              )}
             </button>
 
             <button
@@ -428,15 +541,38 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={loadWallets}
-                  disabled={loadingWallets}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all self-start sm:self-center"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 text-cyan-400 ${loadingWallets ? 'animate-spin' : ''}`} />
-                  <span>{loadingWallets ? 'Verifying...' : 'Re-verify All'}</span>
-                </button>
+                <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('HEALTH_CHECK');
+                      if (!healthSummary && !loadingHealthCheck) loadHealthCheck();
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
+                    title="View live connectivity, permissions, and scope diagnostics"
+                  >
+                    <Activity className="h-3.5 w-3.5 text-cyan-400" />
+                    <span>API Health & Scopes</span>
+                    {healthSummary && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900 text-slate-300 font-mono">
+                        {healthSummary.healthyCount}/{healthSummary.totalConfigured || 0}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadWallets();
+                      loadHealthCheck();
+                    }}
+                    disabled={loadingWallets || loadingHealthCheck}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 text-cyan-400 ${loadingWallets || loadingHealthCheck ? 'animate-spin' : ''}`} />
+                    <span>{loadingWallets || loadingHealthCheck ? 'Verifying...' : 'Re-verify All'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* WALLET CARDS */}
@@ -754,6 +890,387 @@ export const ExchangeManagerModal: React.FC<ExchangeManagerModalProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {activeTab === 'HEALTH_CHECK' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Diagnostic Engine Header & Global Metrics */}
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-cyan-400" />
+                      <h3 className="font-bold text-white text-sm font-mono uppercase tracking-wider">
+                        Live Exchange API & Scope Health Engine
+                      </h3>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono">
+                        REAL-TIME PROBES
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Real-time verification of REST/WebSocket endpoint latency, account balance read permissions, spot order write scopes, and IP geoblocking.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={loadHealthCheck}
+                    disabled={loadingHealthCheck}
+                    className="shrink-0 px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-300 font-mono text-xs font-bold flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md self-start sm:self-center"
+                  >
+                    <RefreshCw className={`h-4 w-4 text-cyan-400 ${loadingHealthCheck ? 'animate-spin' : ''}`} />
+                    <span>{loadingHealthCheck ? 'Probing Endpoints...' : 'Run Full Health Check'}</span>
+                  </button>
+                </div>
+
+                {/* Metrics Summary Row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800">
+                  <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase">Configured Keys</div>
+                    <div className="text-base font-bold font-mono text-white mt-0.5">
+                      {healthSummary ? healthSummary.totalConfigured : 0} <span className="text-xs text-slate-500 font-normal">/ 6 Exchanges</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase">Healthy & Scoped</div>
+                    <div className="text-base font-bold font-mono text-emerald-400 mt-0.5 flex items-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                      <span>{healthSummary ? healthSummary.healthyCount : 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase">Degraded / Read-Only</div>
+                    <div className="text-base font-bold font-mono text-amber-400 mt-0.5 flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 text-amber-400" />
+                      <span>{healthSummary ? healthSummary.degradedCount : 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
+                    <div className="text-[10px] font-mono text-slate-400 uppercase">Regional Restricted</div>
+                    <div className="text-base font-bold font-mono text-purple-400 mt-0.5 flex items-center gap-1.5">
+                      <Globe className="h-4 w-4 text-purple-400" />
+                      <span>{healthSummary ? healthSummary.restrictedCount : 0}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Server Egress IP Whitelisting Banner */}
+                <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] font-mono">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Server className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                    <span className="text-slate-400">Server Egress IP (Whitelist on Exchange Settings):</span>
+                    <span className="font-bold text-white bg-slate-900 px-2 py-0.5 rounded border border-slate-700 select-all">
+                      {healthSummary?.serverEgressIp || 'Detecting Cloud Egress...'}
+                    </span>
+                  </div>
+                  {healthSummary?.serverEgressIp && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (healthSummary.serverEgressIp) {
+                          navigator.clipboard.writeText(healthSummary.serverEgressIp);
+                          setCopiedIp(true);
+                          setTimeout(() => setCopiedIp(false), 2000);
+                        }
+                      }}
+                      className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-mono text-[10px] cursor-pointer self-start sm:self-center"
+                    >
+                      {copiedIp ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                      <span>{copiedIp ? 'IP Copied' : 'Copy IP'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {healthError && (
+                  <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-xs text-rose-300 font-mono flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                    <span>{healthError}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Diagnostic Cards for each Exchange */}
+              <div className="space-y-4">
+                {healthExchangesList.map((ex) => {
+                  const report: ExchangeHealthReport | undefined = healthSummary?.reports?.[ex.id];
+                  const isConfigured = report?.isConfigured || false;
+                  const status = report?.status || 'NOT_CONFIGURED';
+
+                  const getStatusBadge = () => {
+                    switch (status) {
+                      case 'HEALTHY':
+                        return {
+                          label: 'HEALTHY & TRADE-READY',
+                          className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+                          icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />,
+                        };
+                      case 'DEGRADED':
+                        return {
+                          label: 'DEGRADED (SCOPE LIMITED)',
+                          className: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                          icon: <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />,
+                        };
+                      case 'LOCATION_RESTRICTED':
+                        return {
+                          label: 'LOCATION RESTRICTED (HTTP 451)',
+                          className: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
+                          icon: <Globe className="h-3.5 w-3.5 text-purple-400" />,
+                        };
+                      case 'INVALID_CREDENTIALS':
+                        return {
+                          label: 'INVALID CREDENTIALS',
+                          className: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+                          icon: <AlertCircle className="h-3.5 w-3.5 text-rose-400" />,
+                        };
+                      case 'NOT_CONFIGURED':
+                      default:
+                        return {
+                          label: 'NOT CONFIGURED',
+                          className: 'bg-slate-800 text-slate-400 border-slate-700',
+                          icon: <Lock className="h-3.5 w-3.5 text-slate-400" />,
+                        };
+                    }
+                  };
+
+                  const badge = getStatusBadge();
+
+                  const getLatencyColor = (ms?: number) => {
+                    if (!ms) return 'text-slate-500';
+                    if (ms < 150) return 'text-emerald-400';
+                    if (ms < 350) return 'text-amber-400';
+                    return 'text-rose-400';
+                  };
+
+                  return (
+                    <div
+                      key={ex.id}
+                      className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between space-y-4 hover:border-slate-700 transition-all shadow-md"
+                    >
+                      {/* Top Bar: Brand, Status, Latency */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="h-3.5 w-3.5 rounded-full shadow-sm shrink-0"
+                            style={{ backgroundColor: ex.brandColor }}
+                          />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-white text-sm font-sans">{ex.name}</h4>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400">
+                                {ex.endpoint}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-sans mt-0.5">{ex.description}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                          <div
+                            className={`px-2.5 py-1 rounded-full font-mono text-[11px] font-bold border flex items-center gap-1.5 ${badge.className}`}
+                          >
+                            {badge.icon}
+                            <span>{badge.label}</span>
+                          </div>
+
+                          <div
+                            className={`px-2.5 py-1 rounded-full font-mono text-[11px] bg-slate-900 border border-slate-800 flex items-center gap-1.5 ${getLatencyColor(
+                              report?.latencyMs
+                            )}`}
+                          >
+                            <Wifi className="h-3 w-3" />
+                            <span>{report?.latencyMs ? `${report.latencyMs}ms` : '--'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Scopes & Permissions Diagnostic Matrix */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-2 border-t border-slate-800/80">
+                        {/* 1. Market Data Read */}
+                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-slate-400">Market Data Read</span>
+                            {report?.canReadMarket ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                            ) : (
+                              <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                            )}
+                          </div>
+                          <div className="text-xs font-semibold text-white">
+                            {report?.canReadMarket ? 'Live Tickers & Book' : 'Unreachable'}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {report?.canReadMarket ? `Active (${report.latencyMs}ms)` : 'Public API issue'}
+                          </div>
+                        </div>
+
+                        {/* 2. Account Balance Read */}
+                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-slate-400">Balance Query Scope</span>
+                            {report?.canReadBalance ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                            ) : isConfigured ? (
+                              <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                            ) : (
+                              <Lock className="h-3.5 w-3.5 text-slate-500" />
+                            )}
+                          </div>
+                          <div className="text-xs font-semibold text-white">
+                            {report?.canReadBalance
+                              ? 'Balance Read Authorized'
+                              : isConfigured
+                              ? 'Permission Restricted'
+                              : 'Keys Not Linked'}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {report?.canReadBalance
+                              ? 'HMAC Verified'
+                              : isConfigured
+                              ? 'Check Key Permissions'
+                              : 'Awaiting Credentials'}
+                          </div>
+                        </div>
+
+                        {/* 3. Spot Order Execution (Trade Write) */}
+                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-slate-400">Spot Order Write Scope</span>
+                            {report?.canTrade ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                            ) : isConfigured ? (
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                            ) : (
+                              <Lock className="h-3.5 w-3.5 text-slate-500" />
+                            )}
+                          </div>
+                          <div className="text-xs font-semibold text-white">
+                            {report?.canTrade
+                              ? 'Full Trade Execution Active'
+                              : isConfigured
+                              ? 'Read-Only Mode'
+                              : 'Keys Not Linked'}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {report?.canTrade
+                              ? 'Live Order Routing'
+                              : isConfigured
+                              ? 'Spot Trading Scope Disabled'
+                              : 'Awaiting Credentials'}
+                          </div>
+                        </div>
+
+                        {/* 4. IP / Regional Geoblocking Status */}
+                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono">
+                            <span className="text-slate-400">IP & Geo Whitelist</span>
+                            {report?.ipRestrictionStatus === 'RESTRICTED_US' ? (
+                              <Globe className="h-3.5 w-3.5 text-purple-400" />
+                            ) : (
+                              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                            )}
+                          </div>
+                          <div className="text-xs font-semibold text-white">
+                            {report?.ipRestrictionStatus === 'RESTRICTED_US'
+                              ? 'US Cloud IP Restricted'
+                              : 'Unrestricted / Allowed'}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            {report?.ipRestrictionStatus === 'RESTRICTED_US'
+                              ? 'HTTP 451 (Use Binance US)'
+                              : 'Direct API Egress Pass'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Detected Scopes & Balances */}
+                      <div className="space-y-2">
+                        {report?.scopes && report.scopes.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-mono text-slate-400 mr-1">Active Scopes:</span>
+                            {report.scopes.map((s, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-[10px] font-medium"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {report?.balanceSnapshot && Object.keys(report.balanceSnapshot).length > 0 && (
+                          <div className="p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                            <span className="text-slate-400 font-semibold">Live Balances:</span>
+                            {Object.entries(report.balanceSnapshot).map(([asset, val]) => (
+                              <span
+                                key={asset}
+                                className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700/80 text-emerald-300"
+                              >
+                                {asset}: <strong className="text-white">{val}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Diagnostics, Messages & Actionable Help */}
+                      {report?.message && (
+                        <div className="text-[11px] font-mono text-slate-400 bg-slate-900/30 p-2.5 rounded-xl border border-slate-800/60 flex items-start gap-2">
+                          <Activity className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="text-slate-300 font-medium">Diagnostic Note: </span>
+                            {report.message}
+                          </div>
+                        </div>
+                      )}
+
+                      {report?.diagnosticHelp && (
+                        <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-500/40 text-[11px] font-mono text-amber-200 flex items-start gap-2 shadow-sm">
+                          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-amber-300 uppercase tracking-wide">
+                              Troubleshooting Action:{' '}
+                            </span>
+                            {report.diagnosticHelp}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Card Action Buttons */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[10px] font-mono text-slate-500">
+                          API Key:{' '}
+                          <span className="text-slate-300 font-bold">{report?.keyMasked || 'None Configured'}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenLinkModal(ex.id)}
+                            className="py-1.5 px-3 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-semibold text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Key className="h-3.5 w-3.5" />
+                            <span>{isConfigured ? 'Update Credentials' : 'Link API Keys'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenTransaction(ex.id)}
+                            className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                            <span>Order Gateway</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

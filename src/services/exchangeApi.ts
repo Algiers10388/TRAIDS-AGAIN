@@ -1,4 +1,4 @@
-import { ExchangeId, ExchangeWallet, ExchangeWalletTransaction } from '../types';
+import { ExchangeHealthCheckSummary, ExchangeId, ExchangeWallet, ExchangeWalletTransaction } from '../types';
 
 export async function fetchExchangeWallets(): Promise<{
   wallets: Record<ExchangeId, ExchangeWallet>;
@@ -99,3 +99,16 @@ export async function fetchWalletTransactions(): Promise<ExchangeWalletTransacti
     return [];
   }
 }
+
+export async function fetchExchangeHealthCheck(): Promise<ExchangeHealthCheckSummary> {
+  const res = await fetch('/api/exchange/health-check');
+  if (!res.ok) {
+    throw new Error(`Health check probe failed with status HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to complete exchange API health check');
+  }
+  return data.healthSummary;
+}
+

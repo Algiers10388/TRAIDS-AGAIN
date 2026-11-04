@@ -533,6 +533,38 @@ export interface ExchangeWalletTransaction {
   executionNote?: string;
 }
 
+export type HealthStatusType = 'HEALTHY' | 'DEGRADED' | 'INVALID_CREDENTIALS' | 'LOCATION_RESTRICTED' | 'NOT_CONFIGURED';
+
+export interface ExchangeHealthReport {
+  exchange: ExchangeId;
+  exchangeName: string;
+  isConfigured: boolean;
+  status: HealthStatusType;
+  latencyMs: number;
+  canReadBalance: boolean;
+  canReadMarket: boolean;
+  canTrade: boolean;
+  scopes: string[];
+  ipRestrictionStatus: 'RESTRICTED_US' | 'ALLOWED' | 'UNRESTRICTED' | 'NOT_CONFIGURED';
+  detectedIp?: string;
+  balanceSnapshot?: Record<string, string>;
+  lastChecked: number;
+  message: string;
+  diagnosticHelp?: string;
+  keyMasked?: string | null;
+}
+
+export interface ExchangeHealthCheckSummary {
+  timestamp: number;
+  totalConfigured: number;
+  healthyCount: number;
+  degradedCount: number;
+  restrictedCount: number;
+  serverEgressIp?: string;
+  reports: Record<ExchangeId, ExchangeHealthReport>;
+}
+
+
 // ==========================================
 // Etherscan On-Chain Intelligence & Agent Swarm
 // ==========================================
