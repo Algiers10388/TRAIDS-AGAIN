@@ -2018,11 +2018,71 @@ async function getEthOnchainBalance(address: string): Promise<number | null> {
             requiresCredentials: true,
           });
         }
-        return res.status(500).json({
-          success: false,
-          exchange: 'COINBASE',
-          error: 'Coinbase API gateway connection failed. Verify API key and IP whitelisting.',
-        });
+        try {
+          const timestamp = Math.floor(Date.now() / 1000).toString();
+          const method = 'POST';
+          const requestPath = '/api/v3/brokerage/orders';
+          const cleanProd = symbol.includes('BTC') ? 'BTC-USD' : symbol.includes('ETH') ? 'ETH-USD' : symbol.replace('/', '-');
+          const clientOrderId = `cb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          
+          const orderBody = {
+            client_order_id: clientOrderId,
+            product_id: cleanProd,
+            side: side.toUpperCase(),
+            order_configuration: {
+              market_market_ioc: {
+                quote_size: notional ? notional.toFixed(2) : undefined,
+                base_size: !notional && amount ? amount.toFixed(6) : undefined,
+              },
+            },
+          };
+          const bodyStr = JSON.stringify(orderBody);
+          const message = timestamp + method + requestPath + bodyStr;
+          const sig = crypto.createHmac('sha256', coinbaseSecret).update(message).digest('hex');
+
+          const cbRes = await fetch('https://api.coinbase.com' + requestPath, {
+            method: 'POST',
+            headers: {
+              'CB-ACCESS-KEY': coinbaseKey,
+              'CB-ACCESS-SIGN': sig,
+              'CB-ACCESS-TIMESTAMP': timestamp,
+              'Content-Type': 'application/json',
+            },
+            body: bodyStr,
+            signal: AbortSignal.timeout(6000),
+          });
+
+          const cbData = await cbRes.json();
+          if (cbRes.ok && cbData.success && cbData.order_id) {
+            return res.json({
+              success: true,
+              isRealMoney: true,
+              mode: 'LIVE_REAL_TRADING',
+              exchange: 'COINBASE',
+              exchangeOrderId: `cb-${cbData.order_id}`,
+              symbol,
+              side,
+              amount,
+              status: 'PLACED_ON_EXCHANGE',
+              timestamp: now,
+              cryptographicReceipt: `0x${orderHash.substring(0, 32)}`,
+              executionNote: `Real order placed on Coinbase Advanced Trade matching engine. Order ID: ${cbData.order_id}`,
+            });
+          }
+          return res.status(400).json({
+            success: false,
+            exchange: 'COINBASE',
+            error: cbData.error_response?.message || cbData.message || 'Coinbase Advanced Trade order rejected by matching engine.',
+            diagnosticHelp: 'Ensure your Coinbase API Key has "trade" scope enabled and cloud egress IP is allowed.',
+          });
+        } catch (cbErr: any) {
+          return res.status(500).json({
+            success: false,
+            exchange: 'COINBASE',
+            error: `Coinbase API gateway connection failed: ${cbErr.message}`,
+            diagnosticHelp: 'Check API key format and network connectivity to Coinbase Advanced Trade.',
+          });
+        }
       }
 
       // Execute on Binance Real Exchange

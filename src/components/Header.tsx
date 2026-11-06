@@ -3,12 +3,14 @@ import {
   Activity,
   ArrowUpFromLine,
   Bot,
+  BrainCircuit,
   ChevronDown,
   CreditCard,
   Eye,
   Key,
   Landmark,
   Lock,
+  MessageSquare,
   MoreVertical,
   Radar,
   Radio,
@@ -45,6 +47,7 @@ interface HeaderProps {
   activeTab?: ActivePageTab;
   onSelectTab?: (tab: ActivePageTab) => void;
   onChainSignalsCount?: number;
+  sentimentScore?: number;
   onOpenOkxWallet?: () => void;
   okxConnectedAddress?: string | null;
   onOpenCakeWallet?: () => void;
@@ -72,6 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab = 'TRADING_DESK',
   onSelectTab,
   onChainSignalsCount = 5,
+  sentimentScore,
 }) => {
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const totalEquity = portfolio.cash + unrealizedPnl;
@@ -121,6 +125,32 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Zap className="h-3 w-3 text-cyan-400" />
                 <span>Desk</span>
+              </button>
+
+              <button
+                onClick={() => onSelectTab('SENTIMENT_RADAR')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors cursor-pointer text-xs ${
+                  activeTab === 'SENTIMENT_RADAR'
+                    ? 'bg-pink-600/30 text-pink-200 font-semibold shadow-sm border border-pink-500/40'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="AI Sentiment Analysis & Social Media Radar"
+              >
+                <BrainCircuit className="h-3 w-3 text-pink-400" />
+                <span>Sentiment</span>
+                {sentimentScore !== undefined && (
+                  <span
+                    className={`text-[10px] ml-0.5 px-1 rounded font-bold ${
+                      sentimentScore > 0
+                        ? 'text-emerald-400 bg-emerald-950/60'
+                        : sentimentScore < 0
+                        ? 'text-rose-400 bg-rose-950/60'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {sentimentScore > 0 ? `+${sentimentScore}` : sentimentScore}
+                  </span>
+                )}
               </button>
 
               <button

@@ -9,6 +9,7 @@ import { setupExchangeRoutes } from "./server/exchangeRoutes";
 import { aiRouter } from "./server/aiRoutes";
 import { walletRouter } from "./server/walletRoutes";
 import { flashArbRouter } from "./server/flashArbRoutes";
+import { sentimentRouter } from "./server/sentimentRoutes";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { getOrCreateUser } from "./src/db/users.ts";
 import {
@@ -82,6 +83,9 @@ async function startServer() {
 
   // Flash Loan Arbitrage Gas Monitor & Searcher Signer Gateway
   app.use('/api/flash-arb', flashArbRouter);
+
+  // AI Sentiment Analysis & Social Media News Gateway
+  app.use('/api/sentiment', sentimentRouter);
 
   // Health check
   app.get("/api/health", (_req, res) => {

@@ -34,6 +34,7 @@ import {
   TradingExecutionMode,
   CredentialsSummary,
   ActivePageTab,
+  SentimentIntelligenceReport,
 } from './types';
 import { EtherscanIntelligencePage } from './components/EtherscanIntelligencePage';
 import { FlashArbBotDashboard } from './components/FlashArbBotDashboard';
@@ -42,6 +43,12 @@ import { AiTroubleshooterModal } from './components/AiTroubleshooterModal';
 import { OnChainWalletMonitor } from './components/OnChainWalletMonitor';
 import { OkxWalletModal } from './components/OkxWalletModal';
 import { CakeWalletConnectModal } from './components/CakeWalletConnectModal';
+import { SentimentAnalysisPanel } from './components/SentimentAnalysisPanel';
+import {
+  fetchLiveSentimentReport,
+  triggerAiSentimentAnalysis,
+  injectCustomSentimentPost,
+} from './services/sentimentApi';
 import { getCachedOkxAddress } from './services/okxWallet';
 import {
   generateInitialCandles,
@@ -111,6 +118,10 @@ export default function App() {
   const [strategy, setStrategy] = useState<StrategyParameters>(() => ({
     ...STRATEGY_PRESETS[0],
     symbol: 'BTC/USDT',
+    sentimentIntegrationEnabled: true,
+    sentimentMode: 'CONFIRMATORY',
+    minSentimentThreshold: -20,
+    sentimentWeightPercent: 30,
   }));
 
   const [portfolio, setPortfolio] = useState<PortfolioState>(INITIAL_PORTFOLIO);
@@ -130,6 +141,31 @@ export default function App() {
   const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResult | null>(null);
   const [backtestModalOpen, setBacktestModalOpen] = useState<boolean>(false);
   const [tradingDeskView, setTradingDeskView] = useState<'EXECUTION' | 'CORRELATION_MATRIX'>('EXECUTION');
+
+  // AI Sentiment Intelligence Module State
+  const [sentimentReport, setSentimentReport] = useState<SentimentIntelligenceReport | null>(null);
+  const [loadingSentiment, setLoadingSentiment] = useState<boolean>(false);
+
+  const loadSentiment = async () => {
+    try {
+      setLoadingSentiment(true);
+      const rep = await fetchLiveSentimentReport();
+      if (rep) {
+        setSentimentReport(rep);
+      }
+    } catch (err) {
+      console.warn('Could not load live crypto sentiment report:', err);
+    } finally {
+      setLoadingSentiment(false);
+    }
+  };
+
+  // Poll real-time sentiment intelligence on mount and every 25s
+  useEffect(() => {
+    loadSentiment();
+    const interval = setInterval(loadSentiment, 25000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Live Currency Account State (Bank & Debit Card Rails)
   const [fiatAccount, setFiatAccount] = useState<FiatAccount>({
@@ -732,13 +768,70 @@ export default function App() {
       sellReason = `RSI Overbought Exhaustion (${indicators.rsi.toFixed(1)} >= ${strategy.rsiSellThreshold}) or MACD Bearish Reversal`;
     }
 
+    // --- INTEGRATE SENTIMENT INTELLIGENCE INTO BOT DECISION GATING ---
+    if (strategy.sentimentIntegrationEnabled && sentimentReport) {
+      const mode = strategy.sentimentMode || 'CONFIRMATORY';
+      const cleanSym = selectedSymbol.split('/')[0];
+      const assetSentiment = sentimentReport.assetBreakdown?.[cleanSym];
+      const effectiveSentimentScore = assetSentiment ? assetSentiment.score : sentimentReport.compositeScore;
+      const directive = sentimentReport.tradingDirective;
+
+      if (mode === 'CONFIRMATORY') {
+        // Confirmatory Mode: Technical buy signal MUST be verified by sentiment.
+        // If sentiment is heavily bearish or directive explicitly says SUPPRESS_BUY, suppress the trade.
+        if (met) {
+          const minThreshold = strategy.minSentimentThreshold ?? -20;
+          if (directive?.sentimentGateStatus === 'SUPPRESS_BUY' || effectiveSentimentScore < minThreshold) {
+            met = false;
+            reason = `⛔ Sentiment Gate Veto (${effectiveSentimentScore > 0 ? '+' : ''}${effectiveSentimentScore} / ${assetSentiment?.sentiment || sentimentReport.overallSentiment}): ${directive?.reasoning || 'Bearish news/social media sentiment suppresses entries'}`;
+          } else {
+            reason = `${reason} • 🟢 Sentiment Validated (${effectiveSentimentScore > 0 ? '+' : ''}${effectiveSentimentScore} ${assetSentiment?.sentiment || sentimentReport.overallSentiment})`;
+          }
+        }
+
+        // Emergency Technical/Sentiment Exit: If panic conditions or extreme liquidation fear emerges, trigger exit
+        if (!sellMet && (directive?.sentimentGateStatus === 'FORCE_SELL_RISK' || effectiveSentimentScore <= -60)) {
+          sellMet = true;
+          sellReason = `🚨 Sentiment Emergency Exit Triggered (${effectiveSentimentScore} Panic / Extreme Fear): ${directive?.reasoning || 'Elevated liquidation cascade fear'}`;
+        }
+      } else if (mode === 'WEIGHTED_CONFLUENCE') {
+        // Weighted Confluence Mode: Blends technical score with sentiment weight
+        const weightPct = (strategy.sentimentWeightPercent || 30) / 100;
+        if (met && effectiveSentimentScore < -35) {
+          met = false;
+          reason = `Weighted Sentiment Veto: Technical buy neutralized by negative news/social flow (${effectiveSentimentScore})`;
+        } else if (met) {
+          reason = `${reason} • 📊 Weighted Sentiment (${effectiveSentimentScore > 0 ? '+' : ''}${effectiveSentimentScore} @ ${(weightPct * 100).toFixed(0)}% weight)`;
+        } else if (!met && effectiveSentimentScore >= 65 && indicators.rsi <= 45 && indicators.macd.histogram >= -0.2) {
+          // Strong positive news breakout catalyst
+          met = true;
+          reason = `🚀 Sentiment Catalyst Entry: Ultra-Bullish Sentiment (${effectiveSentimentScore} / Strong News Flow) with RSI ${indicators.rsi.toFixed(1)}`;
+        }
+
+        if (!sellMet && effectiveSentimentScore <= -50 && indicators.rsi >= 50) {
+          sellMet = true;
+          sellReason = `Sentiment Bearish Confluence Exit: Negative news flow (${effectiveSentimentScore}) confirms momentum breakdown`;
+        }
+      } else if (mode === 'CONTRARIAN') {
+        // Contrarian Mode: Accumulate in peak fear bottoms at technical support; take profit in euphoria
+        if (effectiveSentimentScore <= -50 && (indicators.rsi <= 40 || bbPercentB <= 0.25)) {
+          met = true;
+          reason = `💎 Contrarian 'Blood in the Streets' Buy: Extreme Fear (${effectiveSentimentScore}) at RSI Support (${indicators.rsi.toFixed(1)}) / %B ${bbPercentB.toFixed(2)}`;
+        }
+        if (effectiveSentimentScore >= 65 && indicators.rsi >= 65) {
+          sellMet = true;
+          sellReason = `Contrarian Distribution Exit: Extreme Euphoria / Greed Peak (${effectiveSentimentScore}) with RSI ${indicators.rsi.toFixed(1)}`;
+        }
+      }
+    }
+
     return {
       isBuyConditionMet: met,
       buyConditionReason: reason,
       isSellConditionMet: sellMet,
       sellConditionReason: sellReason,
     };
-  }, [strategy, indicators, activeAsset, arbitrageOpp]);
+  }, [strategy, indicators, activeAsset, arbitrageOpp, sentimentReport, selectedSymbol]);
 
   // Toggle exchange connection in pool
   const handleToggleExchange = (id: ExchangeId) => {
@@ -1623,6 +1716,13 @@ export default function App() {
               margin = portfolio.cash * (strategy.orderSizePercent / 100);
             }
 
+            // Dynamically scale position sizing with Sentiment Intelligence multiplier
+            let sentimentMultiplier = 1.0;
+            if (strategy.sentimentIntegrationEnabled && sentimentReport?.tradingDirective?.recommendedPositionMultiplier) {
+              sentimentMultiplier = sentimentReport.tradingDirective.recommendedPositionMultiplier;
+              margin = Math.max(30, margin * sentimentMultiplier);
+            }
+
             if (margin >= 30) {
               lastOrderTimeRef.current = now;
               const notional = margin * leverage;
@@ -1821,6 +1921,7 @@ export default function App() {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onChainSignalsCount={onChainSignalsCount}
+        sentimentScore={sentimentReport?.compositeScore}
         onOpenOkxWallet={() => setOkxWalletModalOpen(true)}
         okxConnectedAddress={okxConnectedAddress}
         onOpenCakeWallet={() => setCakeWalletModalOpen(true)}
@@ -1829,7 +1930,34 @@ export default function App() {
       {/* Educational Risk Guidance Banner */}
       <RiskDisclosureBanner />
 
-      {activeTab === 'ETHERSCAN_INTELLIGENCE' ? (
+      {activeTab === 'SENTIMENT_RADAR' ? (
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4">
+          <SentimentAnalysisPanel
+            report={sentimentReport}
+            loading={loadingSentiment}
+            onRefresh={loadSentiment}
+            onTriggerAiAnalysis={async (prompt) => {
+              const res = await triggerAiSentimentAnalysis({ customQuery: prompt });
+              if (res && res.report) {
+                setSentimentReport(res.report);
+              }
+            }}
+            onInjectPost={async (item) => {
+              const rep = await injectCustomSentimentPost(item);
+              if (rep) {
+                setSentimentReport(rep);
+              }
+            }}
+            strategy={strategy}
+            onUpdateStrategy={(updates) => setStrategy((prev) => ({ ...prev, ...updates }))}
+            selectedAssetSymbol={selectedSymbol}
+            onSelectAsset={(sym) => {
+              handleSelectSymbol(sym);
+              setActiveTab('TRADING_DESK');
+            }}
+          />
+        </main>
+      ) : activeTab === 'ETHERSCAN_INTELLIGENCE' ? (
         <EtherscanIntelligencePage
           onBackToTradingDesk={() => setActiveTab('TRADING_DESK')}
           onTradeAsset={(sym) => {

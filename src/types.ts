@@ -209,7 +209,13 @@ export interface StrategyParameters {
   bollingerPeriod?: number; // default 20
   bollingerStdDev?: number; // default 2
   autoSellEnabled?: boolean; // default true - enables automated selling / exiting on technical sell signals
+  // AI Sentiment Analysis & Social Media Integration
+  sentimentIntegrationEnabled?: boolean; // default true - enables AI sentiment to influence trading decisions
+  sentimentMode?: 'CONFIRMATORY' | 'WEIGHTED_CONFLUENCE' | 'CONTRARIAN' | 'OFF'; // default 'CONFIRMATORY'
+  minSentimentThreshold?: number; // threshold e.g. +15 for buy, -15 for sell
+  sentimentWeightPercent?: number; // weight % e.g. 30% sentiment, 70% technicals in WEIGHTED_CONFLUENCE
 }
+
 
 export interface Order {
   id: string;
@@ -569,7 +575,81 @@ export interface ExchangeHealthCheckSummary {
 // Etherscan On-Chain Intelligence & Agent Swarm
 // ==========================================
 
-export type ActivePageTab = 'TRADING_DESK' | 'ETHERSCAN_INTELLIGENCE' | 'FLASH_ARB_BOT' | 'WALLET_MONITOR';
+export type ActivePageTab = 'TRADING_DESK' | 'SENTIMENT_RADAR' | 'ETHERSCAN_INTELLIGENCE' | 'FLASH_ARB_BOT' | 'WALLET_MONITOR';
+
+// ==========================================
+// AI Sentiment Analysis & Social Media Intelligence
+// ==========================================
+
+export type SentimentCategory = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+
+export type SentimentMarketImpact = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type SentimentTradingBias = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+
+export type StrategyConfig = StrategyParameters;
+
+export type SentimentBotMode = 'CONFIRMATORY' | 'WEIGHTED_CONFLUENCE' | 'CONTRARIAN' | 'OFF';
+
+export interface SentimentFeedItem {
+  id: string;
+  source: 'TWITTER' | 'REDDIT' | 'COINDESK' | 'COINTELEGRAPH' | 'BLOOMBERG' | 'DECRYPT' | 'TELEGRAM';
+  sourceName: string;
+  author: string;
+  authorHandle?: string;
+  title: string;
+  content: string;
+  url?: string;
+  timestamp: number;
+  sentiment: SentimentCategory;
+  score: number; // -100 (Extreme Fear / Bearish) to +100 (Extreme Greed / Bullish)
+  confidence: number; // 0 to 100%
+  relatedAssets: string[]; // e.g. ['BTC', 'ETH']
+  keyTopics: string[]; // e.g. ['Spot ETF Inflows', 'Fed Rate Cut', 'Liquidation Cascade']
+  marketImpact: SentimentMarketImpact;
+  tradingRecommendation: 'BUY_BIAS' | 'SELL_BIAS' | 'NEUTRAL_WAIT';
+  upvotesOrLikes?: number;
+  sharesOrRetweets?: number;
+}
+
+export interface AssetSentimentSummary {
+  symbol: string;
+  sentiment: SentimentCategory;
+  score: number; // -100 to +100
+  sampleCount: number;
+  bullishPercent: number;
+  bearishPercent: number;
+  neutralPercent: number;
+  bias: SentimentTradingBias;
+  velocity: 'HIGH' | 'NORMAL' | 'SURGING';
+  topHeadline: string;
+  lastUpdated: number;
+}
+
+export interface SentimentIntelligenceReport {
+  timestamp: number;
+  compositeScore: number; // -100 to +100
+  overallSentiment: SentimentCategory;
+  fearGreedIndex: number; // 0 to 100
+  fearGreedLabel: 'EXTREME_FEAR' | 'FEAR' | 'NEUTRAL' | 'GREED' | 'EXTREME_GREED';
+  socialVelocityPostsPerMin: number;
+  bullishSignalsCount: number;
+  bearishSignalsCount: number;
+  neutralSignalsCount: number;
+  topTrendingTopics: Array<{ topic: string; count: number; sentiment: SentimentCategory }>;
+  assetBreakdown: Record<string, AssetSentimentSummary>;
+  feed: SentimentFeedItem[];
+  tradingDirective: {
+    bias: SentimentTradingBias;
+    confidencePercent: number;
+    reasoning: string;
+    recommendedPositionMultiplier: number; // 0.6x to 1.4x
+    sentimentGateStatus: 'ALLOW_BUY' | 'SUPPRESS_BUY' | 'FORCE_SELL_RISK' | 'HOLD_NEUTRAL';
+  };
+  aiModelUsed: string;
+  isAiAnalyzed: boolean;
+}
+
 
 export interface TokenHolding {
   symbol: string;
